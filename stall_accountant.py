@@ -136,6 +136,14 @@ def main():
     json.dump(roll, open(STATE,"w"), indent=1)
     json.dump(roll, open(STATE_LEGACY,"w"), indent=1)
     json.dump(pos,  open(TRK_LEGACY,"w"), indent=1)
+    # push state to the VPS so the Omega desk GUI (:7779 /api/companion -> loadFile C:\Omega\) can nest the
+    # companion under each live trade. Best-effort; reuses the same ssh ControlMaster as the telemetry poll.
+    try:
+        subprocess.run(["scp","-o","ConnectTimeout=6","-o","BatchMode=yes","-o","ControlMaster=auto",
+            "-o","ControlPath=/tmp/ssh-omega-stall-%r@%h:%p","-o","ControlPersist=120",
+            STATE, "omega-vps:C:/Omega/companion_state.json"], capture_output=True, timeout=15)
+    except Exception as e:
+        print("companion: VPS push failed", e)
     print(f"companion: open {len(pos)} | banked-now {banked} | realized ${round(realized_total,2)} | by_reason {by_reason}")
 
 if __name__ == "__main__":
