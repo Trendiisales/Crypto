@@ -84,10 +84,22 @@ def _close(pos, key, reason, pnl, bar):
     del pos[key]
     return (p['book'], p['eng'], p['sym'], reason, round(pnl,2))
 
+CLIPPED = os.path.join(HERE, "companion_clipped.json")   # keys clipped while their real trade is STILL open
+
 def main():
     pos = json.load(open(POS)) if os.path.exists(POS) else {}
+    # keys already clipped while the underlying trade is still live -> do NOT re-open a new companion
+    # for them every cycle (that re-clip loop is what made the realized total jump run-to-run).
+    clipped = set(json.load(open(CLIPPED))) if os.path.exists(CLIPPED) else set()
     omega = poll_omega()
     if omega is None: print("companion: skip cycle (omega telemetry unreachable) — book untouched"); return
+    # RESTART/BLIP GUARD (2026-06-27): telemetry can return UP-but-EMPTY for a minute or two
+    # during an Omega restart (API live, trades not yet reloaded). Without this, the ENGINE_EXIT
+    # loop below phantom-banks EVERY open OMEGA companion as if it closed — that produced the
+    # bogus "$269.9 banked" on a XAU short that was actually still open. If omega telemetry is
+    # empty while we still hold open OMEGA companions, treat it as a blip and skip the cycle.
+    if len(omega) == 0 and any(p.get("book") == "OMEGA" for p in pos.values()):
+        print("companion: omega telemetry empty but holding open OMEGA companions — skip cycle (restart/blip guard)"); return
     rows = omega + poll_crypto()
     bar = int(time.time()) // TF_SEC
     live = {}; banked = []
@@ -97,6 +109,8 @@ def main():
             if key in pos: live[key] = pos[key]["last_upnl"]
             continue
         live[key] = upnl
+        if key in clipped:                                     # already clipped this still-open trade -> don't re-open
+            continue
         fav = ((current - entry) / entry if side.upper().startswith("L") else (entry - current) / entry) * 100.0
         if key not in pos:
             pos[key] = {"book":book,"eng":eng,"sym":sym,"side":side,"entry":round(entry,4),
@@ -108,11 +122,15 @@ def main():
         p["last_upnl"] = upnl
         armed = p["mfe_pct"] >= GATE_PCT                       # profit-gate cleared
         if armed and p["stall"] >= N_STALL:                                   # VALIDATED H4 stall
-            banked.append(_close(pos, key, "STALL_CLIP", upnl, bar)); continue
+            banked.append(_close(pos, key, "STALL_CLIP", upnl, bar)); clipped.add(key); continue
         if armed and fav <= p["mfe_pct"] * (1.0 - REV_GB):                    # fast reversal (give-back from peak)
-            banked.append(_close(pos, key, "REVERSAL_CLIP", upnl, bar)); continue
+            banked.append(_close(pos, key, "REVERSAL_CLIP", upnl, bar)); clipped.add(key); continue
     for key in [k for k in pos if k not in live]:                             # real trade closed first
         banked.append(_close(pos, key, "ENGINE_EXIT", pos[key]["last_upnl"], bar))
+    # a clipped trade stays clipped only while its real trade is still live; once the engine
+    # actually closes it (key leaves `live`), drop it so a future NEW trade can be tracked again.
+    clipped = {k for k in clipped if k in live}
+    json.dump(sorted(clipped), open(CLIPPED, "w"))
     json.dump(pos, open(POS,"w"), indent=1)
     # roll-up: realized bank (sum of closed ledger) + open companions, per engine + per reason
     realized_total = 0.0; per = {}; by_reason = {}
