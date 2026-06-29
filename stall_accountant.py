@@ -21,7 +21,7 @@ EXPLORATORY measurements — the realized P&L is data to compare, NOT a proven e
 This is PAPER (no broker order) but treated as REAL: tracked book + running realized P&L + cockpit panel.
 Files: companion_positions.json (open) · companion_closed.csv (bank) · companion_state.json (cockpit roll-up).
 """
-import json, os, subprocess, base64, time, datetime
+import json, os, subprocess, base64, time, datetime, csv
 HERE  = os.path.dirname(os.path.abspath(__file__))
 _DIR  = os.environ.get("COMPANION_DIR", HERE)   # override for the protection self-test sandbox
 POS   = os.path.join(_DIR, "companion_positions.json")
@@ -90,10 +90,18 @@ def poll_crypto():
 def _close(pos, key, reason, pnl, bar):
     p = pos[key]
     new = not (os.path.exists(CLOSED) and os.path.getsize(CLOSED) > 0)
-    with open(CLOSED, "a") as f:
-        if new: f.write("ts,book,reason,engine,symbol,side,entry,realized_pnl,mfe_peak_pct,bars_held\n")
-        f.write(f"{int(time.time())},{p['book']},{reason},{p['eng']},{p['sym']},{p['side']},{p['entry']},"
-                f"{round(pnl,2)},{round(p['mfe_pct'],2)},{bar-p['open_bar']}\n")
+    # S-2026-06-29: write via csv.writer (QUOTE_MINIMAL) so symbols containing
+    # commas -- e.g. "SOL (fut, SQF pending)" -- are properly quoted. Previous
+    # raw f-string writer left them unquoted -> reader's split(",") shifted
+    # columns -> realized_pnl summed entry-price instead of PnL -> fake +$151.
+    with open(CLOSED, "a", newline="") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+        if new:
+            w.writerow(["ts","book","reason","engine","symbol","side","entry",
+                        "realized_pnl","mfe_peak_pct","bars_held"])
+        w.writerow([int(time.time()), p['book'], reason, p['eng'], p['sym'],
+                    p['side'], p['entry'], round(pnl,2), round(p['mfe_pct'],2),
+                    bar - p['open_bar']])
     del pos[key]
     return (p['book'], p['eng'], p['sym'], reason, round(pnl,2))
 
@@ -147,15 +155,26 @@ def main():
     json.dump(sorted(clipped), open(CLIPPED, "w"))
     json.dump(pos, open(POS,"w"), indent=1)
     # roll-up: realized bank (sum of closed ledger) + open companions, per engine + per reason
+    # S-2026-06-29: index the LAST 3 cols (realized_pnl, mfe_peak_pct, bars_held)
+    # negatively so legacy rows written before the csv.writer fix still parse
+    # correctly even when their unquoted symbol field contained commas. Those
+    # last 3 cols are always numeric -> no embedded commas -> safe from -1.
     realized_total = 0.0; per = {}; by_reason = {}
     if os.path.exists(CLOSED) and os.path.getsize(CLOSED) > 0:
-        for i, ln in enumerate(open(CLOSED)):
-            if i == 0: continue
-            c = ln.strip().split(",")
-            if len(c) < 10: continue
-            e = per.setdefault(c[3], {"open":0,"closed":0,"realized":0.0})
-            e["closed"] += 1; e["realized"] += float(c[7]); realized_total += float(c[7])
-            by_reason[c[2]] = round(by_reason.get(c[2],0.0) + float(c[7]), 2)
+        with open(CLOSED, newline="") as f:
+            rdr = csv.reader(f)
+            for i, c in enumerate(rdr):
+                if i == 0: continue
+                if len(c) < 10: continue
+                reason = c[2]; engine = c[3]
+                # negative indices: realized_pnl always 3rd-from-last
+                try:
+                    pnl = float(c[-3])
+                except (ValueError, IndexError):
+                    continue
+                e = per.setdefault(engine, {"open":0,"closed":0,"realized":0.0})
+                e["closed"] += 1; e["realized"] += pnl; realized_total += pnl
+                by_reason[reason] = round(by_reason.get(reason, 0.0) + pnl, 2)
     for p in pos.values():
         e = per.setdefault(p["eng"], {"open":0,"closed":0,"realized":0.0}); e["open"] += 1
     roll = {"updated":datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
