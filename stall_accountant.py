@@ -59,7 +59,13 @@ RE_TRIG_PCT = float(os.environ.get("COMPANION_RETRIG_PCT", "0.05"))
 # S-2026-06-29: NEW trigger. The companion as designed (STALL/REVERSAL only) had NO loss-cut path
 # -- a losing leg rode forever until the real engine closed. LOSS_CUT_CLIP closes the companion
 # when upnl drops below this dollar threshold. Accounting-only (does NOT touch real engine).
-COLD_LOSS = float(os.environ.get("COLD_LOSS_USD", "-50.0"))
+# Per-book defaults (operator 2026-06-29 2nd pass): crypto trades at smaller sizes so -$50 is far too
+# loose -- e.g. SOL -$24 was already meaningful but COLD_LOSS=-50 wouldn't fire. CRYPTO tightened to
+# -$15. OMEGA stays at -$50 (larger trade sizes, e.g. XAU $124 swing -- -$15 would clip prematurely).
+COLD_LOSS_OMEGA  = float(os.environ.get("COLD_LOSS_USD_OMEGA",  os.environ.get("COLD_LOSS_USD", "-50.0")))
+COLD_LOSS_CRYPTO = float(os.environ.get("COLD_LOSS_USD_CRYPTO", "-15.0"))
+def _cold_loss(book):
+    return COLD_LOSS_CRYPTO if book == "CRYPTO" else COLD_LOSS_OMEGA
 
 _PS = ('try{$t=(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7779/api/telemetry -TimeoutSec 6).Content|'
        'ConvertFrom-Json; $t.live_trades|ForEach-Object{$_.engine+"|"+$_.symbol+"|"+$_.side+"|"+'
@@ -180,8 +186,9 @@ def main():
             peak = p["mfe_pct"]
             banked.append(_close(pos, key, "REVERSAL_CLIP", upnl, bar)); clipped[key] = peak; continue
         # S-2026-06-29: cold-loss-cut -- closes the "rides forever underwater" hole. Independent
-        # of armed-state (a never-armed losing leg also bleeds). Accounting-only.
-        if upnl <= COLD_LOSS:
+        # of armed-state (a never-armed losing leg also bleeds). Accounting-only. Per-book threshold:
+        # crypto -$15, omega -$50 (env-overridable).
+        if upnl <= _cold_loss(book):
             peak = p["mfe_pct"]
             banked.append(_close(pos, key, "LOSS_CUT_CLIP", upnl, bar)); clipped[key] = peak; continue
     for key in [k for k in pos if k not in live]:                             # real trade closed first
