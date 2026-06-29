@@ -23,12 +23,24 @@ Files: companion_positions.json (open) · companion_closed.csv (bank) · compani
 """
 import json, os, subprocess, base64, time, datetime
 HERE  = os.path.dirname(os.path.abspath(__file__))
-POS   = os.path.join(HERE, "companion_positions.json")
-CLOSED= os.path.join(HERE, "companion_closed.csv")
-STATE = os.path.join(HERE, "companion_state.json")
-STATE_LEGACY = os.path.join(HERE, "stall_acct_state.json")
-TRK_LEGACY   = os.path.join(HERE, "stall_track.json")
-CRYPTO = os.path.expanduser("~/IBKRCrypto/backtest/data/ibkrcrypto/state.json")
+_DIR  = os.environ.get("COMPANION_DIR", HERE)   # override for the protection self-test sandbox
+POS   = os.path.join(_DIR, "companion_positions.json")
+CLOSED= os.path.join(_DIR, "companion_closed.csv")
+STATE = os.path.join(_DIR, "companion_state.json")
+STATE_LEGACY = os.path.join(_DIR, "stall_acct_state.json")
+TRK_LEGACY   = os.path.join(_DIR, "stall_track.json")
+CRYPTO = os.environ.get("CRYPTO_STATE", os.path.expanduser("~/IBKRCrypto/backtest/data/ibkrcrypto/state.json"))
+SKIP_OMEGA = os.environ.get("SKIP_OMEGA","0") == "1"   # self-test: don't ssh the VPS, crypto-only
+
+# ENGINE SELECTIVITY (operator 2026-06-29): only harvest the giveback on RIDE-WIDE engines that
+# actually bleed it. EXCLUDE self-exit engines (turtles exit on Donchian-low; MR/IBS/RSIrev exit on
+# revert; seasonal on fixed hold) -- backtest (tools/reversal_stop_bt.py) showed clipping them is
+# redundant/slightly-negative. Substring match on engine name; env-overridable as backtests refine.
+ENGINE_EXCLUDE = [s.strip() for s in os.environ.get("COMPANION_EXCLUDE",
+    "IBS,Mean-Rev,MeanRev,RSIrev,RSIRev,Regime,Connors,Seasonal,Monday,Turnaround,TurnOfMonth,Turtle").split(",") if s.strip()]
+def _excluded(eng):
+    e = (eng or "")
+    return any(x.lower() in e.lower() for x in ENGINE_EXCLUDE)
 
 N_STALL  = int(os.environ.get("STALL_BARS", "3"))            # H4 bars with no new favourable extreme = stalled
 GATE_PCT = float(os.environ.get("STALL_GATE_PCT", "2.0"))    # arm triggers only after capturing >= this %
@@ -42,6 +54,7 @@ _PS = ('try{$t=(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7779/api/tel
 
 def poll_omega():
     """Live Omega VPS book via ssh telemetry. Returns rows or None on poll failure (do NOT touch book)."""
+    if SKIP_OMEGA: return []   # self-test sandbox: crypto-only, no VPS ssh
     enc = base64.b64encode(_PS.encode("utf-16-le")).decode()
     try:
         out = subprocess.run(["ssh","-o","ConnectTimeout=6","-o","BatchMode=yes",
@@ -84,7 +97,7 @@ def _close(pos, key, reason, pnl, bar):
     del pos[key]
     return (p['book'], p['eng'], p['sym'], reason, round(pnl,2))
 
-CLIPPED = os.path.join(HERE, "companion_clipped.json")   # keys clipped while their real trade is STILL open
+CLIPPED = os.path.join(_DIR, "companion_clipped.json")   # keys clipped while their real trade is STILL open (sandbox-aware)
 
 def main():
     pos = json.load(open(POS)) if os.path.exists(POS) else {}
@@ -101,6 +114,7 @@ def main():
     if len(omega) == 0 and any(p.get("book") == "OMEGA" for p in pos.values()):
         print("companion: omega telemetry empty but holding open OMEGA companions — skip cycle (restart/blip guard)"); return
     rows = omega + poll_crypto()
+    rows = [r for r in rows if not _excluded(r[1])]   # only harvest ride-wide engines that bleed giveback
     bar = int(time.time()) // TF_SEC
     live = {}; banked = []
     for book, eng, sym, side, entry, current, upnl in rows:
