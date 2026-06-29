@@ -1,0 +1,5 @@
+ts,reason,book,engine,symbol,side,peak_usd,locked_usd,giveback_saved_usd
+1782511261,REVERSAL,CRYPTO,Trend (EMAx),ETH Spot-Quoted (QEF),SHORT,56.6,45.28,11.32
+1782511801,REVERSAL,CRYPTO,Trend (EMAx),SOL (fut, SQF pending),SHORT,20.9,16.72,4.18
+1782514861,STALL,CRYPTO,Trend (EMAx),BTC Spot-Quoted (QTF),SHORT,30.46,30.46,0.0
+1782688754,STALL,OMEGA,XAU_4h_DonchN20,XAUUSD,SHORT,135.09,130.03,5.06

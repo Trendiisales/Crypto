@@ -51,6 +51,13 @@ TF_SEC   = int(float(os.environ.get("STALL_TF_HOURS", "4")) * 3600)
 # keeps running and price makes a NEW high beyond the clip-point, a fresh companion re-opens to
 # catch the next leg (so a tight clip doesn't permanently sideline the engine for the rest of the trade).
 REV_GB   = float(os.environ.get("REVERSAL_GIVEBACK", "0.05"))
+# REVERSAL_GIVEBACK_PTS (S-2026-06-29, operator: intraday "exit when price drops by ~2%"): an ABSOLUTE
+# percentage-point giveback from the MFE peak, independent of pool/leg size. Clip when
+# fav <= mfe_pct - REV_GB_PTS  (e.g. peak +6.0% -> drop to +4.0% with PTS=2.0 -> clip). Default 0 = OFF
+# so the live Omega companion keeps its fraction-of-peak rule unchanged; the intraday crypto companion
+# instance sets REVERSAL_GIVEBACK_PTS=2.0. Pairs with RE_TRIG_PCT below: a fresh companion re-opens if
+# the real trade makes a new favourable high past the clip point (operator: "re-enter if it trends again").
+REV_GB_PTS = float(os.environ.get("REVERSAL_GIVEBACK_PTS", "0.0"))
 # RE_TRIG_PCT (S-2026-06-29): after a clip, if the real trade is still LIVE and its current
 # favourable % exceeds the prior peak by this fraction (i.e. new MFE high made past clip-point),
 # drop the key from the clipped-set and re-open a fresh companion. Banks every leg of a runner
@@ -185,6 +192,9 @@ def main():
         if armed and fav <= p["mfe_pct"] * (1.0 - REV_GB):                    # fast reversal (give-back from peak)
             peak = p["mfe_pct"]
             banked.append(_close(pos, key, "REVERSAL_CLIP", upnl, bar)); clipped[key] = peak; continue
+        if armed and REV_GB_PTS > 0 and fav <= p["mfe_pct"] - REV_GB_PTS:     # absolute-points giveback (intraday 2%)
+            peak = p["mfe_pct"]
+            banked.append(_close(pos, key, "REVERSAL_CLIP", upnl, bar)); clipped[key] = peak; continue
         # S-2026-06-29: cold-loss-cut -- closes the "rides forever underwater" hole. Independent
         # of armed-state (a never-armed losing leg also bleeds). Accounting-only. Per-book threshold:
         # crypto -$15, omega -$50 (env-overridable).
@@ -252,7 +262,7 @@ def main():
     try:
         subprocess.run(["scp","-o","ConnectTimeout=6","-o","BatchMode=yes","-o","ControlMaster=auto",
             "-o","ControlPath=/tmp/ssh-omega-stall-%r@%h:%p","-o","ControlPersist=120",
-            STATE, "omega-vps:C:/Omega/companion_state.json"], capture_output=True, timeout=15)
+            STATE, os.environ.get("COMPANION_VPS_DEST","omega-vps:C:/Omega/companion_state.json")], capture_output=True, timeout=15)
     except Exception as e:
         print("companion: VPS push failed", e)
     print(f"companion: open {len(pos)} | banked-now {banked} | realized ${round(realized_total,2)} | by_reason {by_reason}")
