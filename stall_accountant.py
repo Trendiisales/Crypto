@@ -42,10 +42,24 @@ def _excluded(eng):
     e = (eng or "")
     return any(x.lower() in e.lower() for x in ENGINE_EXCLUDE)
 
-N_STALL  = int(os.environ.get("STALL_BARS", "3"))            # H4 bars with no new favourable extreme = stalled
-GATE_PCT = float(os.environ.get("STALL_GATE_PCT", "2.0"))    # arm triggers only after capturing >= this %
+N_STALL  = int(os.environ.get("STALL_BARS", "2"))            # H4 bars with no new favourable extreme = stalled (tightened 3->2 S-2026-06-29)
+GATE_PCT = float(os.environ.get("STALL_GATE_PCT", "1.5"))    # arm triggers only after capturing >= this % (tightened 2.0->1.5)
 TF_SEC   = int(float(os.environ.get("STALL_TF_HOURS", "4")) * 3600)
-REV_GB   = float(os.environ.get("REVERSAL_GIVEBACK", "0.40"))  # clip if price gives back >= this FRACTION of MFE peak
+# REVERSAL_GIVEBACK: clip when price gives back >= this FRACTION of MFE peak. Operator decision
+# 2026-06-29: 0.40 was absurdly loose (gave back ~half of profit before triggering); tightened to
+# 0.05 (5%). e.g. peak +5% then drop to +4.75% -> clip. Pairs with RE_TRIG below: if real engine
+# keeps running and price makes a NEW high beyond the clip-point, a fresh companion re-opens to
+# catch the next leg (so a tight clip doesn't permanently sideline the engine for the rest of the trade).
+REV_GB   = float(os.environ.get("REVERSAL_GIVEBACK", "0.05"))
+# RE_TRIG_PCT (S-2026-06-29): after a clip, if the real trade is still LIVE and its current
+# favourable % exceeds the prior peak by this fraction (i.e. new MFE high made past clip-point),
+# drop the key from the clipped-set and re-open a fresh companion. Banks every leg of a runner
+# instead of going dark for the rest of the trade after one clip.
+RE_TRIG_PCT = float(os.environ.get("COMPANION_RETRIG_PCT", "0.05"))
+# S-2026-06-29: NEW trigger. The companion as designed (STALL/REVERSAL only) had NO loss-cut path
+# -- a losing leg rode forever until the real engine closed. LOSS_CUT_CLIP closes the companion
+# when upnl drops below this dollar threshold. Accounting-only (does NOT touch real engine).
+COLD_LOSS = float(os.environ.get("COLD_LOSS_USD", "-50.0"))
 
 _PS = ('try{$t=(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7779/api/telemetry -TimeoutSec 6).Content|'
        'ConvertFrom-Json; $t.live_trades|ForEach-Object{$_.engine+"|"+$_.symbol+"|"+$_.side+"|"+'
@@ -111,7 +125,16 @@ def main():
     pos = json.load(open(POS)) if os.path.exists(POS) else {}
     # keys already clipped while the underlying trade is still live -> do NOT re-open a new companion
     # for them every cycle (that re-clip loop is what made the realized total jump run-to-run).
-    clipped = set(json.load(open(CLIPPED))) if os.path.exists(CLIPPED) else set()
+    # S-2026-06-29: clipped is now a DICT {key: prior_peak_pct} so we can re-trigger when the real
+    # trade keeps running and price makes a NEW favourable high past the prior peak by RE_TRIG_PCT.
+    # Legacy: file may be a list-of-keys; convert (lose prior-peak history once, re-arm immediately).
+    clipped = {}
+    if os.path.exists(CLIPPED):
+        try:
+            d = json.load(open(CLIPPED))
+            clipped = d if isinstance(d, dict) else {k: 0.0 for k in d}
+        except Exception:
+            clipped = {}
     omega = poll_omega()
     if omega is None: print("companion: skip cycle (omega telemetry unreachable) — book untouched"); return
     # RESTART/BLIP GUARD (2026-06-27): telemetry can return UP-but-EMPTY for a minute or two
@@ -131,9 +154,16 @@ def main():
             if key in pos: live[key] = pos[key]["last_upnl"]
             continue
         live[key] = upnl
-        if key in clipped:                                     # already clipped this still-open trade -> don't re-open
-            continue
         fav = ((current - entry) / entry if side.upper().startswith("L") else (entry - current) / entry) * 100.0
+        if key in clipped:
+            # S-2026-06-29 re-trigger: real trade still live AND current fav > prior_peak * (1+RE_TRIG)
+            # -> drop from clipped, allow companion to re-open and catch the next leg. Otherwise stay clipped.
+            prior_peak = float(clipped.get(key, 0.0))
+            if RE_TRIG_PCT > 0 and prior_peak > 0 and fav > prior_peak * (1.0 + RE_TRIG_PCT):
+                del clipped[key]
+                print(f"companion: RE-TRIGGER {key} fav={fav:.2f}% > prior_peak={prior_peak:.2f}% * (1+{RE_TRIG_PCT}) -> new companion will arm")
+            else:
+                continue
         if key not in pos:
             pos[key] = {"book":book,"eng":eng,"sym":sym,"side":side,"entry":round(entry,4),
                         "open_ts":int(time.time()),"open_bar":bar,"mfe_pct":fav,"ext_bar":bar,"last_upnl":upnl}
@@ -144,15 +174,22 @@ def main():
         p["last_upnl"] = upnl
         armed = p["mfe_pct"] >= GATE_PCT                       # profit-gate cleared
         if armed and p["stall"] >= N_STALL:                                   # VALIDATED H4 stall
-            banked.append(_close(pos, key, "STALL_CLIP", upnl, bar)); clipped.add(key); continue
+            peak = p["mfe_pct"]
+            banked.append(_close(pos, key, "STALL_CLIP", upnl, bar)); clipped[key] = peak; continue
         if armed and fav <= p["mfe_pct"] * (1.0 - REV_GB):                    # fast reversal (give-back from peak)
-            banked.append(_close(pos, key, "REVERSAL_CLIP", upnl, bar)); clipped.add(key); continue
+            peak = p["mfe_pct"]
+            banked.append(_close(pos, key, "REVERSAL_CLIP", upnl, bar)); clipped[key] = peak; continue
+        # S-2026-06-29: cold-loss-cut -- closes the "rides forever underwater" hole. Independent
+        # of armed-state (a never-armed losing leg also bleeds). Accounting-only.
+        if upnl <= COLD_LOSS:
+            peak = p["mfe_pct"]
+            banked.append(_close(pos, key, "LOSS_CUT_CLIP", upnl, bar)); clipped[key] = peak; continue
     for key in [k for k in pos if k not in live]:                             # real trade closed first
         banked.append(_close(pos, key, "ENGINE_EXIT", pos[key]["last_upnl"], bar))
     # a clipped trade stays clipped only while its real trade is still live; once the engine
     # actually closes it (key leaves `live`), drop it so a future NEW trade can be tracked again.
-    clipped = {k for k in clipped if k in live}
-    json.dump(sorted(clipped), open(CLIPPED, "w"))
+    clipped = {k: v for k, v in clipped.items() if k in live}
+    json.dump(clipped, open(CLIPPED, "w"), indent=1)
     json.dump(pos, open(POS,"w"), indent=1)
     # roll-up: realized bank (sum of closed ledger) + open companions, per engine + per reason
     # S-2026-06-29: index the LAST 3 cols (realized_pnl, mfe_peak_pct, bars_held)
