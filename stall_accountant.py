@@ -204,6 +204,13 @@ def main():
     # correctly even when their unquoted symbol field contained commas. Those
     # last 3 cols are always numeric -> no embedded commas -> safe from -1.
     realized_total = 0.0; per = {}; by_reason = {}
+    # S-2026-06-29: time-bucketed realized so the desk GUI can fold companion P&L
+    # into the TODAY / 1d / 7d / 30d totals (operator: "fold into real totals").
+    # UTC day boundary matches the desk's updDayPnl cut. Buckets are CUMULATIVE
+    # windows (all closes in the last N days), not calendar buckets.
+    _now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    _cut_today = (int(_now) // 86400) * 86400
+    realized_today = realized_7d = realized_30d = 0.0
     if os.path.exists(CLOSED) and os.path.getsize(CLOSED) > 0:
         with open(CLOSED, newline="") as f:
             rdr = csv.reader(f)
@@ -219,11 +226,20 @@ def main():
                 e = per.setdefault(engine, {"open":0,"closed":0,"realized":0.0})
                 e["closed"] += 1; e["realized"] += pnl; realized_total += pnl
                 by_reason[reason] = round(by_reason.get(reason, 0.0) + pnl, 2)
+                try:
+                    ts = float(c[0])
+                    if ts >= _cut_today:        realized_today += pnl
+                    if ts >= _now - 7*86400:    realized_7d    += pnl
+                    if ts >= _now - 30*86400:   realized_30d   += pnl
+                except (ValueError, IndexError):
+                    pass
     for p in pos.values():
         e = per.setdefault(p["eng"], {"open":0,"closed":0,"realized":0.0}); e["open"] += 1
     roll = {"updated":datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "stall_bars":N_STALL,"gate_pct":GATE_PCT,"reversal_giveback":REV_GB,
             "open_companions":len(pos),"realized_total":round(realized_total,2),
+            "realized_today":round(realized_today,2),"realized_7d":round(realized_7d,2),
+            "realized_30d":round(realized_30d,2),
             "by_reason":by_reason,"per_engine":per,
             "open_detail":[{"book":p["book"],"eng":p["eng"],"sym":p["sym"],"side":p["side"],"entry":p["entry"],
                             "mfe_pct":round(p["mfe_pct"],2),"stall":p["stall"],"upnl":round(p["last_upnl"],2),
