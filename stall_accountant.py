@@ -214,6 +214,10 @@ def main():
     # correctly even when their unquoted symbol field contained commas. Those
     # last 3 cols are always numeric -> no embedded commas -> safe from -1.
     realized_total = 0.0; per = {}; by_reason = {}
+    # S-2026-06-29: per-BOOK rollup so each desk shows ONLY its own book's companion bank.
+    # Operator rule: crypto GUI = crypto-only, Omega GUI = Omega-only; the sole cross-book
+    # spot allowed is the Omega comp-bank total, and even there split Omega vs Crypto.
+    by_book = {}   # {book: {"realized":x, "by_reason":{reason:x}}}
     # S-2026-06-29: time-bucketed realized so the desk GUI can fold companion P&L
     # into the TODAY / 1d / 7d / 30d totals (operator: "fold into real totals").
     # UTC day boundary matches the desk's updDayPnl cut. Buckets are CUMULATIVE
@@ -227,7 +231,7 @@ def main():
             for i, c in enumerate(rdr):
                 if i == 0: continue
                 if len(c) < 10: continue
-                reason = c[2]; engine = c[3]
+                book = c[1]; reason = c[2]; engine = c[3]
                 # negative indices: realized_pnl always 3rd-from-last
                 try:
                     pnl = float(c[-3])
@@ -236,11 +240,15 @@ def main():
                 e = per.setdefault(engine, {"open":0,"closed":0,"realized":0.0})
                 e["closed"] += 1; e["realized"] += pnl; realized_total += pnl
                 by_reason[reason] = round(by_reason.get(reason, 0.0) + pnl, 2)
+                bk = by_book.setdefault(book, {"realized":0.0,"realized_today":0.0,
+                                               "realized_7d":0.0,"realized_30d":0.0,"by_reason":{}})
+                bk["realized"] = round(bk["realized"] + pnl, 2)
+                bk["by_reason"][reason] = round(bk["by_reason"].get(reason, 0.0) + pnl, 2)
                 try:
                     ts = float(c[0])
-                    if ts >= _cut_today:        realized_today += pnl
-                    if ts >= _now - 7*86400:    realized_7d    += pnl
-                    if ts >= _now - 30*86400:   realized_30d   += pnl
+                    if ts >= _cut_today:        realized_today += pnl; bk["realized_today"] = round(bk["realized_today"]+pnl,2)
+                    if ts >= _now - 7*86400:    realized_7d    += pnl; bk["realized_7d"]    = round(bk["realized_7d"]+pnl,2)
+                    if ts >= _now - 30*86400:   realized_30d   += pnl; bk["realized_30d"]   = round(bk["realized_30d"]+pnl,2)
                 except (ValueError, IndexError):
                     pass
     for p in pos.values():
@@ -250,7 +258,7 @@ def main():
             "open_companions":len(pos),"realized_total":round(realized_total,2),
             "realized_today":round(realized_today,2),"realized_7d":round(realized_7d,2),
             "realized_30d":round(realized_30d,2),
-            "by_reason":by_reason,"per_engine":per,
+            "by_reason":by_reason,"by_book":by_book,"per_engine":per,
             "open_detail":[{"book":p["book"],"eng":p["eng"],"sym":p["sym"],"side":p["side"],"entry":p["entry"],
                             "mfe_pct":round(p["mfe_pct"],2),"stall":p["stall"],"upnl":round(p["last_upnl"],2),
                             "eligible": p["mfe_pct"]>=GATE_PCT} for p in pos.values()]}
