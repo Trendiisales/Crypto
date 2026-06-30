@@ -1,6 +1,29 @@
-companion_positions.json
-companion_closed.csv
-companion_state.json
-stall_track.json
-stall_acct_state.json
+# build
+build/
+*.o
+*.dSYM/
+
+# runtime data (state, ledgers, fetched CSVs) — regenerated, not tracked
+data/ibkrcrypto/
+data/ibkrcrypto_intraday/
+data/ibkrcrypto_luke/
+data/funding/
+data/*.csv
+*.flag
+ALARM_STALE.txt
+
+# compiled binaries (built into build/, never committed at repo root)
+/ibkrcrypto_bt
+/shadow_refresh
+/fetch
+/live_mark
+/gui_server
+/ibkrcrypto_engine
+
+# legacy companion runtime (legacy_companion/ holds preserved sources)
+legacy_companion/companion_positions.json
+legacy_companion/companion_closed.csv
+legacy_companion/companion_state.json
+legacy_companion/stall_track.json
+legacy_companion/stall_acct_state.json
 __pycache__/
