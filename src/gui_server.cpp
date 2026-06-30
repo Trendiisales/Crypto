@@ -356,6 +356,10 @@ int main() {
         serve_json(res, out.dump());
     });
 
+    // no-store on every response (incl. the static mount) so the dashboard never serves a stale cached page
+    svr.set_post_routing_handler([](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-store");
+    });
     // static dashboard (gui/index.html). mount serves /index.html; "/" redirects to it.
     svr.set_mount_point("/", gui_dir());
     svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
