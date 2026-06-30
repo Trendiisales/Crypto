@@ -150,6 +150,12 @@ int main() {
         legs.push_back({L, fr.ok, integ, fr.ok && integ,
                         round_n(fr.bar, 1), round_n(fr.file, 1), t, sz, px, expx});
     }
+    // KILL_FLAT marker (written by the GUI kill button): force every leg flat. t=0 for
+    // all legs -> pass 2's existing flip-close path books each open leg out at last mark
+    // (reuses the PnL math, no duplication). Durable: the producer keeps booking flat
+    // every run while the marker exists; operator deletes DATADIR/KILL_FLAT to resume.
+    const bool KILLED = file_exists(DATADIR + "/KILL_FLAT");
+    if (KILLED) { for (auto& g : legs) g.t = 0; }
     int n_open = 0; for (auto& g : legs) if (g.t != 0) n_open++;
     const double per_leg = POOL / std::max(1, n_open);
 
@@ -328,7 +334,7 @@ int main() {
         {"open_unreal_usd", round_n(tot_unreal_usd, 2)}, {"realized_usd", round_n(tot_real_usd, 2)},
         {"total_usd", round_n(tot_unreal_usd + tot_real_usd, 2)},
         {"pool_usd", POOL}, {"deployed_usd", round_n(deployed, 0)},
-        {"n_open", n_open_state},
+        {"n_open", n_open_state}, {"killed", KILLED},
         {"ndx_basis", NDX_NQ_BASIS}, {"ndx_basis_date", ndx_cash_date},
         {"ndx_mark_src", have_live_ndx ? "IBKR-NQ" : "daily-close"},
         {"clipped", clipped_json}, {"slots", slots}, {"closed", closed}

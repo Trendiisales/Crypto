@@ -19,6 +19,7 @@
 #include <chrono>
 #include <ctime>
 #include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <sys/stat.h>
 
@@ -29,6 +30,15 @@ using crypto::env_or;
 static std::string gui_dir()  { return env_or("IBKRCRYPTO_GUIDIR", "/Users/jo/Crypto/gui"); }
 static std::string home_dir() { return env_or("HOME", "/Users/jo"); }
 static bool exists(const std::string& p) { struct stat st; return ::stat(p.c_str(), &st) == 0; }
+static std::string dirname_of(const std::string& p) {
+    size_t sl = p.find_last_of('/');
+    return (sl == std::string::npos) ? "." : p.substr(0, sl);
+}
+// KILL_FLAT marker = book held flat (see shadow_refresh.cpp / refresh_shadow_intraday.py /
+// refresh_luke_shadow.py). It lives in the book's state-dir; producers honor it durably.
+static bool killed_for(const std::string& statePath) {
+    return exists(dirname_of(statePath) + "/KILL_FLAT");
+}
 static std::string first_existing(const std::vector<std::string>& cands, const std::string& fallback) {
     for (auto& p : cands) if (exists(p)) return p;
     return fallback;
@@ -164,6 +174,7 @@ static std::string inject_fresh(const std::string& body, const std::string& path
     try {
         json d = json::parse(body);
         d["_fresh"] = freshness(d, path, kind);
+        d["killed"] = killed_for(path);  // instant badge: marker present even before producer rewrites state
         return d.dump();
     } catch (...) {
         return body;
@@ -279,8 +290,17 @@ int main() {
             R"({"engine":"IBKRCrypto-Intraday","mode":"SHADOW","slots":[],"closed":[],"_fresh":{"stale":true,"reasons":["state unreachable"]}})");
     });
     svr.Get("/api/state_luke", [](const httplib::Request&, httplib::Response& res) {
-        serve_file_or(res, STATE_LUKE,
-            R"({"book":"LukeCrypto","mode":"SHADOW","equity":0,"n_open":0,"positions":[],"closed_today":0,"last":"unreachable"})");
+        std::ifstream f(STATE_LUKE, std::ios::binary);
+        if (!f) {
+            serve_json(res, R"({"book":"LukeCrypto","mode":"SHADOW","equity":0,"n_open":0,"positions":[],"closed_today":0,"last":"unreachable"})");
+            return;
+        }
+        std::ostringstream ss; ss << f.rdbuf();
+        try {
+            json d = json::parse(ss.str());
+            d["killed"] = killed_for(STATE_LUKE);
+            serve_json(res, d.dump());
+        } catch (...) { serve_json(res, ss.str()); }
     });
     svr.Get("/api/companion_intraday", [](const httplib::Request&, httplib::Response& res) {
         serve_file_or(res, COMP_INTRA, R"({"open_companions":0,"open_detail":[],"realized_total":0})");
@@ -295,6 +315,45 @@ int main() {
     svr.Get("/api/companion", [](const httplib::Request&, httplib::Response& res) {
         serve_file_or(res, COMP,
             R"({"open_companions":0,"positions":[],"gate_pct":2.0,"stall_bars":3,"reversal_giveback":0.4,"realized_total":0})");
+    });
+
+    // ---- KILL button: per-book panic-flatten (paper/shadow only) ----
+    // POST /api/flatten?book=daily|intraday|luke. Writes the durable KILL_FLAT marker into the
+    // book's state-dir, then triggers an immediate producer run so the flatten BOOKS NOW (each
+    // open leg closed at last mark) using the producer's own PnL math -- no duplicated accounting
+    // here. The marker persists, so the book stays flat every run until the operator deletes it.
+    // Real money is NOT reachable: these producers write shadow ledgers only.
+    svr.Post("/api/flatten", [](const httplib::Request& req, httplib::Response& res) {
+        std::string book = req.has_param("book") ? req.get_param_value("book") : "daily";
+        std::string statePath, prod;
+        const std::string BT = "/Users/jo/IBKRCrypto/backtest";
+        if (book == "intraday") {
+            statePath = STATE_INTRA;
+            prod = "cd " + BT + " && /usr/bin/python3 refresh_shadow_intraday.py >/dev/null 2>&1";
+        } else if (book == "luke") {
+            statePath = STATE_LUKE;
+            prod = "cd " + BT + " && /usr/bin/python3 refresh_luke_shadow.py >/dev/null 2>&1";
+        } else if (book == "daily") {
+            statePath = STATE;
+            prod = "cd " + BT + " && /Users/jo/Crypto/build/shadow_refresh >/dev/null 2>&1";
+        } else {
+            res.status = 400;
+            serve_json(res, R"({"ok":false,"error":"unknown book"})");
+            return;
+        }
+        std::string marker = dirname_of(statePath) + "/KILL_FLAT";
+        std::ofstream mf(marker, std::ios::trunc);
+        if (!mf) {
+            res.status = 500;
+            serve_json(res, R"({"ok":false,"error":"could not write KILL_FLAT marker"})");
+            return;
+        }
+        mf << "KILL_FLAT " << (long)std::time(nullptr) << " via gui kill button\n";
+        mf.close();
+        int rc = std::system(prod.c_str());
+        json out = {{"ok", true}, {"book", book}, {"killed", true},
+                    {"marker", marker}, {"producer_rc", rc}};
+        serve_json(res, out.dump());
     });
 
     // static dashboard (gui/index.html). mount serves /index.html; "/" redirects to it.
