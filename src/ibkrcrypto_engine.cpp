@@ -22,7 +22,8 @@
 #include <fstream>
 #include "IbkrCryptoStrat.hpp"
 #include "CmeSqfContracts.hpp"
-#include "RiskManager.hpp"            // reused from Omega/ibkr
+#include "RiskManager.hpp"            // vendored from Omega/ibkr (catastrophe caps)
+#include "crypto/Roster.hpp"         // crypto::data_dir() — env-overridable output dir
 
 #ifdef OMEGA_WITH_IBKR
 #include "EWrapper.h"
@@ -116,14 +117,14 @@ private:
     }
 
     void log_(const std::string& sym,int want,int contracts,double px,double mult){
-        std::ofstream led("data/ibkrcrypto/daily_ledger.csv",std::ios::app);
+        std::ofstream led(crypto::data_dir()+"/daily_ledger.csv",std::ios::app);
         led<<sym<<","<<want<<","<<contracts<<","<<px<<","<<mult<<","<<(live_?"LIVE":"SHADOW")<<"\n";
         std::printf("[IBKRCRYPTO][%s] %s target=%d contracts=%d px=%.2f vt=%.2f\n",
             live_?"LIVE":"SHADOW", sym.c_str(), want, contracts, px, mult);
         write_state_();   // refresh GUI state.json
     }
     void write_state_(){
-        std::ofstream st("data/ibkrcrypto/state.json");
+        std::ofstream st(crypto::data_dir()+"/state.json");
         st<<"{\"engine\":\"IBKRCrypto\",\"mode\":\""<<(live_?"LIVE":"SHADOW")<<"\",\"slots\":[";
         for(size_t i=0;i<slots_.size();++i){ if(i)st<<","; st<<"{\"sym\":\""<<slots_[i].sym<<"\",\"pos\":"<<slots_[i].pos<<"}"; }
         st<<"]}";

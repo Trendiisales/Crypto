@@ -48,8 +48,22 @@ crypto_exe(live_mark        src/live_mark.cpp        CURL::libcurl)
 # GUI server — cpp-httplib (vendored) needs threads.
 crypto_exe(gui_server       src/gui_server.cpp       Threads::Threads)
 
-# Live IBKR engine — needs TWS API; OFF by default (set -DCRYPTO_WITH_IBKR=ON + TWSAPI path).
-option(CRYPTO_WITH_IBKR "Build the live IBKR engine (requires TWS API)" OFF)
-if(CRYPTO_WITH_IBKR)
-  crypto_exe(ibkrcrypto_engine src/ibkrcrypto_engine.cpp Threads::Threads)
+# Live IBKR engine. Always built as a testable STUB (the #else path: signal core only,
+# prints a build hint). The REAL live engine (TWS connect, clientId 88, SQF orders) compiles
+# only with -DCRYPTO_WITH_IBKR=ON -DTWSAPI=<.../source/cppclient/client> on a box with the
+# TWS API. SHADOW by default at runtime (no orders unless --live).
+option(CRYPTO_WITH_IBKR "Build the REAL live IBKR engine against the TWS API" OFF)
+if(EXISTS ${CMAKE_SOURCE_DIR}/src/ibkrcrypto_engine.cpp)
+  add_executable(ibkrcrypto_engine src/ibkrcrypto_engine.cpp)
+  target_include_directories(ibkrcrypto_engine PRIVATE ${CRYPTO_INCLUDES})
+  target_link_libraries(ibkrcrypto_engine PRIVATE Threads::Threads)
+  if(CRYPTO_WITH_IBKR)
+    if(NOT DEFINED TWSAPI OR NOT EXISTS ${TWSAPI})
+      message(FATAL_ERROR "CRYPTO_WITH_IBKR=ON requires -DTWSAPI=<path to TWS API source/cppclient/client>")
+    endif()
+    target_compile_definitions(ibkrcrypto_engine PRIVATE OMEGA_WITH_IBKR)
+    target_include_directories(ibkrcrypto_engine PRIVATE ${TWSAPI})
+    file(GLOB TWS_SRC ${TWSAPI}/*.cpp)
+    target_sources(ibkrcrypto_engine PRIVATE ${TWS_SRC})
+  endif()
 endif()
