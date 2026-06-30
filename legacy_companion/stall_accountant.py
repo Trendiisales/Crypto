@@ -42,8 +42,15 @@ SKIP_CRYPTO = os.environ.get("SKIP_CRYPTO","0") == "1"
 # actually bleed it. EXCLUDE self-exit engines (turtles exit on Donchian-low; MR/IBS/RSIrev exit on
 # revert; seasonal on fixed hold) -- backtest (tools/reversal_stop_bt.py) showed clipping them is
 # redundant/slightly-negative. Substring match on engine name; env-overridable as backtests refine.
+# TSMom50 (S-2026-06-30, [[NdxCompanionClip]]): the NDX index-trend leg is a TREND RUNNER, NOT crypto.
+# Faithful BT (ibkrcrypto_bt, regime MA200, vol-target, live costs): the 5% giveback clip DESTROYS it
+# (WIDE +87% PF1.72 vs clip +59% PF1.16, maxDD WORSE 38.9->44.7, churns 76->350 trades) -- same
+# mechanism as the crypto trend legs. It must ride WIDE on its OWN MERIT (as an index runner), NOT
+# merely as a side-effect of SKIP_CRYPTO -- so it stays excluded even if the crypto book is re-enabled.
+# (BE-ratchet -- the one protection that HELPS NDX -- lives in the engine leg (LIVE: ~/Crypto shadow_refresh.cpp;
+#  rollback: refresh_shadow.py), NDX-only, default ON via NDX_BE_RATCHET -- NOT in this companion.)
 ENGINE_EXCLUDE = [s.strip() for s in os.environ.get("COMPANION_EXCLUDE",
-    "IBS,Mean-Rev,MeanRev,RSIrev,RSIRev,Regime,Connors,Seasonal,Monday,Turnaround,TurnOfMonth,Turtle").split(",") if s.strip()]
+    "IBS,Mean-Rev,MeanRev,RSIrev,RSIRev,Regime,Connors,Seasonal,Monday,Turnaround,TurnOfMonth,Turtle,TSMom50").split(",") if s.strip()]
 def _excluded(eng):
     e = (eng or "")
     return any(x.lower() in e.lower() for x in ENGINE_EXCLUDE)
