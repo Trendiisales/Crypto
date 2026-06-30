@@ -31,6 +31,12 @@ STATE_LEGACY = os.path.join(_DIR, "stall_acct_state.json")
 TRK_LEGACY   = os.path.join(_DIR, "stall_track.json")
 CRYPTO = os.environ.get("CRYPTO_STATE", os.path.expanduser("~/IBKRCrypto/backtest/data/ibkrcrypto/state.json"))
 SKIP_OMEGA = os.environ.get("SKIP_OMEGA","0") == "1"   # self-test: don't ssh the VPS, crypto-only
+# S-2026-06-30: crypto trend rides WIDE (faithful BT crypto_companion_trigger_bt.py +
+# crypto_companion_intraday_bt.py: every profit-clip policy LOSES to WIDE on crypto trend,
+# all TFs, both-halves+both-regimes; the live intraday +$87 was n=18 small-sample). So we
+# stop mirroring crypto in the clip companion -- it rides wide untouched. Omega XAU clip
+# (validated +$411 real) is unaffected. Set SKIP_CRYPTO=1 to drop the crypto book.
+SKIP_CRYPTO = os.environ.get("SKIP_CRYPTO","0") == "1"
 
 # ENGINE SELECTIVITY (operator 2026-06-29): only harvest the giveback on RIDE-WIDE engines that
 # actually bleed it. EXCLUDE self-exit engines (turtles exit on Donchian-low; MR/IBS/RSIrev exit on
@@ -101,6 +107,7 @@ def poll_omega():
 def poll_crypto():
     """Local crypto book (IBKRCrypto state.json). Mirrors every slot with an open pos."""
     rows = []
+    if SKIP_CRYPTO: return rows   # S-2026-06-30: crypto rides WIDE (clip loses to wide, faithful BT) -> don't mirror
     try:
         d = json.load(open(CRYPTO))
     except Exception as e:
