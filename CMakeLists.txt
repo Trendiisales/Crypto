@@ -42,8 +42,8 @@ crypto_exe(shadow_refresh   src/shadow_refresh.cpp   Threads::Threads)
 # Data fetch — needs libcurl + json.
 crypto_exe(fetch            src/fetch.cpp            CURL::libcurl)
 
-# Live mark — json (+ shells ssh; no extra link).
-crypto_exe(live_mark        src/live_mark.cpp)
+# Live mark — Binance spot ticker (libcurl + json).
+crypto_exe(live_mark        src/live_mark.cpp        CURL::libcurl)
 
 # GUI server — cpp-httplib (vendored) needs threads.
 crypto_exe(gui_server       src/gui_server.cpp       Threads::Threads)
