@@ -67,7 +67,10 @@ int main() {
         clipped[it.key()] = it.value().get<int>();
 
     const std::string now = utc_now_min();
-    const double POOL = std::stod(env_or("POOL_USD", "10000"));
+    // Account capital = NZ$5000 (operator basis 2026-06-30). NZDUSD 0.584 (latest tick
+    // 2026-04-10, ~/Tick/NZDUSD; no live NZDUSD feed) -> USD ~2920. Override via POOL_USD
+    // env to correct FX/resize. Was 10000 (pre-cutover paper). Single live book = daily.
+    const double POOL = std::stod(env_or("POOL_USD", "2920"));
 
     // COMPANION PROTECTION (default OFF; env-gated). Real-leg rides wide.
     const bool   PROTECT       = env_or("COMPANION_PROTECT", "0") != "0";

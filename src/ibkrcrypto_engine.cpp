@@ -17,6 +17,7 @@
 // Not yet added to CMake -- a standalone fleet binary, wired on approval.
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <fstream>
@@ -36,6 +37,15 @@
 
 using namespace ibkrcrypto;
 
+// Account capital (USD-notional, since SQF are USD-denominated).
+// Operator basis 2026-06-30: NZ$5000 account. NZDUSD 0.584 (latest tick 2026-04-10,
+// ~/Tick/NZDUSD; no live NZDUSD feed) -> USD ~2920. Override with RISK_USD env to
+// correct the FX or resize. Was 50000 (pre-cutover paper).
+static double account_usd(){
+    if(const char* e = std::getenv("RISK_USD")) { double v = std::atof(e); if(v > 0) return v; }
+    return 2920.0;  // NZ$5000 @ NZDUSD 0.584
+}
+
 // Build a CME Spot-Quoted Future contract for an IBKRCrypto symbol.
 static Contract sqf_contract(const SqfContract& sc){
     Contract c; c.symbol=sc.ib_symbol; c.secType=sc.sec_type;
@@ -48,7 +58,7 @@ static Contract sqf_contract(const SqfContract& sc){
 class IbkrCryptoEngine : public DefaultEWrapper {
 public:
     IbkrCryptoEngine(bool live)
-        : live_(live), risk_(50000.0) {
+        : live_(live), risk_(account_usd()) {
         risk_.new_day();
         cli_ = std::make_unique<EClientSocket>(this,&sig_);
         // build the validated roster
@@ -97,7 +107,8 @@ private:
             Contract c=sqf_contract(*slots_[i].sc);
             cli_->reqHistoricalData(rid,c,"","1 Y","1 day","MIDPOINT",1,1,false,TagValueListSPtr());
         }
-        std::printf("[IBKRCRYPTO] %zu SQF slots subscribed (SHADOW=%d)\n",slots_.size(),!live_);
+        std::printf("[IBKRCRYPTO] %zu SQF slots subscribed (SHADOW=%d) account=$%.0f USD (NZ$5000 @ 0.584)\n",
+                    slots_.size(),!live_,account_usd());
     }
 
     void decide_(int s, double px){
