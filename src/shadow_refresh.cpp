@@ -77,6 +77,16 @@ int main() {
     const double PROT_DEAD_SEC = std::stod(env_or("PROT_DEAD_SEC", "259200"));
     const double PROT_DEAD_USD = std::stod(env_or("PROT_DEAD_USD", "-20"));
 
+    // BE-RATCHET on the NDX index-trend leg only (S-2026-06-30, NdxCompanionClip).
+    // NDX (TSMom50) is the ONE leg where a break-even ratchet HELPS. NOT the giveback
+    // companion -- that clip DESTROYS this trend runner (faithful ibkrcrypto_bt: 5% giveback
+    // +59% PF1.16, maxDD WORSE 38.9->44.7, churns 76->350 trades). The engine-native ratchet
+    // cuts green->red round-trips WITHOUT clipping runners: arm +1.5% / floor breakeven ->
+    // +95.6% PF1.78 vs wide +87% PF1.72, better OOS (PF2.65 DD8.6%). NDX-only, default ON.
+    const bool   NDX_BE       = env_or("NDX_BE_RATCHET", "1") != "0";
+    const double NDX_BE_ARM   = std::stod(env_or("NDX_BE_ARM", "0.015"));
+    const double NDX_BE_FLOOR = std::stod(env_or("NDX_BE_FLOOR", "0.0"));
+
     bool newled = !file_exists(LEDGER);
     bool newinb = !file_exists(INBOUND);
     std::ofstream led(LEDGER, std::ios::app);
@@ -171,11 +181,33 @@ int main() {
 
         double peak_usd = (p.contains("peak_usd") && p["peak_usd"].is_number()) ? p["peak_usd"].get<double>() : 0.0;
         long   peak_ts  = (p.contains("peak_ts")  && p["peak_ts"].is_number())  ? p["peak_ts"].get<long>()    : 0;
+        double be_peak  = (p.contains("be_peak")  && p["be_peak"].is_number())  ? p["be_peak"].get<double>()  : 0.0;
 
+        // re-open guard: honor a clip ONLY while its owning protection is enabled (else it's a stale
+        // clip from a now-disabled protection -> drop it, don't resurrect a force-flat). Hold flat
+        // until the signal flips off the clipped direction.
+        {
+            auto cl = clipped.find(L.key);
+            if (cl != clipped.end()) {
+                bool owner_on = PROTECT || (NDX_BE && L.sym == "NDX" && L.strat == "TSMom50");
+                if (!owner_on || t != cl->second) clipped.erase(cl);
+                else t = 0;
+            }
+        }
+        // BE-RATCHET: NDX index-trend leg only (engine-native break-even ratchet, NOT the giveback companion)
+        if (NDX_BE && L.sym == "NDX" && L.strat == "TSMom50" && pos0 != 0 && epx > 0 && t == pos0) {
+            double cur_ret = pos0 * (px - epx) / epx;                  // favorable return frac (signed by direction)
+            double be_pk = (p.contains("be_peak") && p["be_peak"].is_number()) ? p["be_peak"].get<double>() : cur_ret;
+            if (cur_ret > be_pk) be_pk = cur_ret;
+            be_peak = be_pk;
+            if (be_pk >= NDX_BE_ARM && cur_ret <= NDX_BE_FLOOR) {       // armed (+1.5%) then gave it all back to breakeven
+                clipped[L.key] = pos0; t = 0;
+                std::fprintf(stderr, "[BE-RATCHET] NDX force-close %s ret=%.2f%% peak=%.2f%%\n",
+                             pos0 > 0 ? "LONG" : "SHORT", cur_ret * 100, be_pk * 100);
+            }
+        }
         // COMPANION PROTECTION (default OFF)
         if (PROTECT) {
-            auto cl = clipped.find(L.key);
-            if (cl != clipped.end()) { if (t == cl->second) t = 0; else clipped.erase(cl); }
             if (pos0 != 0 && epx > 0 && t == pos0) {
                 double cur_usd = pos0 * (px - epx) * L.mult * qty;
                 double pk = (p.contains("peak_usd") && p["peak_usd"].is_number()) ? p["peak_usd"].get<double>() : cur_usd;
@@ -222,7 +254,7 @@ int main() {
             }
             if (t != 0) {
                 epx = px; ets = json(now); qty = qty_for(epx, L.mult, scale);
-                peak_usd = 0.0; peak_ts = unix_from(now);
+                peak_usd = 0.0; peak_ts = unix_from(now); be_peak = 0.0;
                 led << now << "," << L.key << ",OPEN " << t << "," << t << ","
                     << fmt(px, 4) << ",," << fmt(cum, 3) << "\n";
                 ntrades++;
@@ -244,6 +276,8 @@ int main() {
             {"realized_usd", round_n(cum_usd, 2)}, {"clean", clean},
             {"peak_usd", t ? round_n(peak_usd, 2) : 0.0},
             {"peak_ts", t ? json(peak_ts) : json(nullptr)},
+            {"be_peak", (t && L.sym == "NDX") ? round_n(be_peak, 5) : 0.0},
+            {"asset_class", L.sym == "NDX" ? "INDEX" : "CRYPTO"},
             {"fresh", g.fresh}, {"stale", !g.fresh},
             {"bar_age_d", g.bar_age}, {"file_age_d", g.file_age}
         };
