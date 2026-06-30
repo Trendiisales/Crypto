@@ -65,7 +65,7 @@ public:
         for(const auto& e : ROSTER){
             const SqfContract* sc = find_sqf(e.sym);
             if(!sc || sc->unit<=0) continue;
-            slots_.push_back({e.sym, sc, IbkrCryptoStrat(e.mode), 0});
+            slots_.push_back({e.sym, sc, IbkrCryptoStrat(e.mode), 0.0, 0});
         }
     }
 
@@ -82,9 +82,10 @@ public:
     }
 
     // historicalData / historicalDataUpdate feed daily bars into each strat.
-    void historicalData(TickerId rid,const Bar& b) override {
+    void historicalData(TickerId rid,const ::Bar& b) override {
         int s=rid_to_slot_[rid]; if(s<0) return;
-        ibkrcrypto::Bar bar{ std::stod(b.open),std::stod(b.high),std::stod(b.low),std::stod(b.close) };
+        ibkrcrypto::Bar bar{ b.open, b.high, b.low, b.close };
+        slots_[s].last_close = b.close;
         slots_[s].strat.on_daily_bar(bar);
     }
     void historicalDataEnd(int rid,const std::string&,const std::string&) override {
@@ -97,7 +98,7 @@ public:
     }
 
 private:
-    struct Slot { std::string sym; const SqfContract* sc; IbkrCryptoStrat strat; double last_close; };
+    struct Slot { std::string sym; const SqfContract* sc; IbkrCryptoStrat strat; double last_close; int pos; };
 
     void resolve_and_subscribe_(){
         // For each slot: reqContractDetails (resolve SQF conId/tradingClass) then
