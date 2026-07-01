@@ -228,7 +228,17 @@ private:
         write_state_();   // refresh GUI state.json
     }
     void write_state_(){
-        std::ofstream st(crypto::data_dir()+"/state.json");
+        // MUST NOT be data_dir()/state.json -- that file is the daily-book GUI state
+        // owned by shadow_refresh + live_mark (rich schema w/ live_mark_ts + per-slot
+        // px). This engine writes a compact {sym,pos} schema with no timestamp, so
+        // clobbering the shared file makes the GUI show "no timestamps -> STALE" and
+        // undefined px. Write to a private file instead (env-overridable at cutover
+        // if/when the engine becomes the GUI's designated daily producer).
+        // History: a 2026-07-01 shadow verification run wrote the shared state.json
+        // and tripped the daily-book staleness alarm.
+        const std::string sp = crypto::env_or("IBKRCRYPTO_ENGINE_STATE",
+                                               crypto::data_dir()+"/engine_state.json");
+        std::ofstream st(sp);
         st<<"{\"engine\":\"IBKRCrypto\",\"mode\":\""<<(live_?"LIVE":"SHADOW")<<"\",\"slots\":[";
         for(size_t i=0;i<slots_.size();++i){ if(i)st<<","; st<<"{\"sym\":\""<<slots_[i].sym<<"\",\"pos\":"<<slots_[i].pos<<"}"; }
         st<<"]}";
