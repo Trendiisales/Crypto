@@ -39,6 +39,7 @@
 #include "EReaderOSSignal.h"
 #include "Contract.h"
 #include "Order.h"
+#include "OrderState.h"      // whatIf preview result (commission/margin) — --probe-crypto
 #include "Decimal.h"          // DecimalFunctions::doubleToDecimal — Order.totalQuantity is bid64
 
 using namespace ibkrcrypto;
@@ -63,8 +64,8 @@ static Contract sqf_contract(const SqfContract& sc){
 
 class IbkrCryptoEngine : public DefaultEWrapper {
 public:
-    IbkrCryptoEngine(bool live, bool flatten=false)
-        : live_(live), flatten_(flatten), risk_(account_usd()) {
+    IbkrCryptoEngine(bool live, bool flatten=false, bool probe=false)
+        : live_(live), flatten_(flatten), probe_(probe), risk_(account_usd()) {
         risk_.new_day();
         cli_ = std::make_unique<EClientSocket>(this,&sig_);
         // build the validated roster
@@ -92,6 +93,20 @@ public:
 
     void nextValidId(OrderId id) override { nextId_=id;
         std::printf("[IBKRCRYPTO] connected, nextValidId=%ld clientId=88\n",(long)id);
+        if(probe_){
+            // Non-destructive eligibility probe: can this account resolve IBKR spot-crypto
+            // (CSP/Paxos) contracts? reqContractDetails only -- NO orders. err 200 "no
+            // security definition" / permission errors surface via error(). reqId>=3000.
+            const char* venues[]={"PAXOS","ZEROHASH"};
+            const char* coins[]={"BTC","ETH"};
+            int rid=3000;
+            for(const char* v:venues) for(const char* co:coins){
+                Contract c; c.symbol=co; c.secType="CRYPTO"; c.exchange=v; c.currency="USD";
+                std::printf("[IBKRCRYPTO][PROBE] reqContractDetails %s CRYPTO %s USD (reqId=%d)\n",co,v,rid);
+                cli_->reqContractDetails(rid++, c);
+            }
+            return;
+        }
         if(flatten_){
             std::printf("[IBKRCRYPTO] PANIC FLATTEN mode: requesting positions (roster-scoped, live=%d)\n",live_);
             cli_->reqPositions();   // -> position() sweep, close only our SQF legs
@@ -113,6 +128,16 @@ public:
 
     void error(int id,int code,const std::string& msg,const std::string&) override {
         if(code!=2104&&code!=2106&&code!=2158) std::fprintf(stderr,"[IBKRCRYPTO] err %d: %s\n",code,msg.c_str());
+    }
+
+    // whatIf order preview result -- commission/margin if eligible; a permission error
+    // instead arrives via error(). Only relevant to --probe-crypto.
+    void openOrder(OrderId,const Contract& c,const Order&,const OrderState& st) override {
+        if(!probe_) return;
+        std::printf("[IBKRCRYPTO][PROBE] whatIf OK %s status=%s commission=%s %s initMargin=%s maintMargin=%s\n",
+                    c.symbol.c_str(), st.status.c_str(),
+                    st.commission==st.commission?std::to_string(st.commission).c_str():"n/a", st.commissionCurrency.c_str(),
+                    st.initMarginChange.c_str(), st.maintMarginChange.c_str());
     }
 
     // PANIC FLATTEN — close ONLY our roster's SQF legs on the shared account.
@@ -151,12 +176,34 @@ public:
     // supply. The CSV is the exact validated series the backtest+shadow book use, so
     // warming from it is bar-for-bar faithful; IB is used only for execution.
     void contractDetails(int reqId,const ContractDetails& cd) override {
+        if(reqId>=3000){   // PROBE: spot-crypto eligibility
+            const Contract& c=cd.contract;
+            std::printf("[IBKRCRYPTO][PROBE] RESOLVED %s %s %s conId=%ld localSym=%s\n",
+                        c.symbol.c_str(),c.secType.c_str(),c.exchange.c_str(),(long)c.conId,c.localSymbol.c_str());
+            // Decisive non-destructive permission test: whatIf order (preview only, never
+            // executes). Returns commission/margin in orderState if eligible, or an error
+            // if not permitted -- the exact check that would have caught the SQF err 201.
+            // IBKR spot-crypto MKT orders require IOC. Probe PAXOS only (one venue enough).
+            if(c.exchange=="PAXOS"){
+                // LMT + share qty (not MKT+cashQty): the integer bid64 shim cannot encode
+                // UNSET_DECIMAL that cashQty leaves in totalQuantity (err 320 '-inf'). A LMT
+                // exercises the SAME permission gate. Far-from-market limit so it never fills.
+                double lmt = (c.symbol=="BTC")?1000.0:100.0;
+                Order o; o.action="BUY"; o.orderType="LMT"; o.lmtPrice=lmt;
+                o.totalQuantity=DecimalFunctions::doubleToDecimal(1.0);   // whole unit: integer shim can't do fractional; whatIf never fills
+                o.tif="DAY"; o.whatIf=true;
+                std::printf("[IBKRCRYPTO][PROBE] whatIf BUY 1 %s @ LMT %.0f (conId=%ld)\n",c.symbol.c_str(),lmt,(long)c.conId);
+                cli_->placeOrder(nextId_++, c, o);
+            }
+            return;
+        }
         auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
         Slot& sl=slots_[it->second];
         const std::string& exp=cd.contract.lastTradeDateOrContractMonth;
         if(!sl.has_con || exp<sl.front_expiry){ sl.resolved=cd.contract; sl.has_con=true; sl.front_expiry=exp; }
     }
     void contractDetailsEnd(int reqId) override {
+        if(reqId>=3000){ std::printf("[IBKRCRYPTO][PROBE] end reqId=%d\n",reqId); return; }
         auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
         int s=it->second; Slot& sl=slots_[s];
         if(!sl.has_con){ std::fprintf(stderr,"[IBKRCRYPTO] UNRESOLVED %s (%s) — no CME def, slot idle\n",
@@ -308,7 +355,7 @@ private:
         st<<"]}";
     }
 
-    bool live_; bool flatten_; OrderId nextId_=0;
+    bool live_; bool flatten_; bool probe_=false; OrderId nextId_=0;
     EReaderOSSignal sig_{2000};
     std::unique_ptr<EClientSocket> cli_; std::unique_ptr<EReader> rd_;
     std::vector<Slot> slots_; std::unordered_map<int,int> rid_to_slot_;
@@ -324,13 +371,14 @@ private:
 
 int main(int argc,char**argv){
     setvbuf(stdout,nullptr,_IONBF,0);
-    int port=4002; bool live=false; bool flatten=false;
+    int port=4002; bool live=false; bool flatten=false; bool probe=false;
     for(int i=1;i<argc;++i){
         if(!strcmp(argv[i],"--live")) live=true;
         else if(!strcmp(argv[i],"--flatten")) flatten=true;
+        else if(!strcmp(argv[i],"--probe-crypto")) probe=true;
         else port=atoi(argv[i]);
     }
-    IbkrCryptoEngine e(live,flatten);
+    IbkrCryptoEngine e(live,flatten,probe);
     if(!e.connect("127.0.0.1",port,88)){ std::printf("connect failed\n"); return 1; }
     for(int i=0;i<2000;++i) e.pump();
     e.cli()->eDisconnect(); std::printf("[IBKRCRYPTO] session end\n"); return 0;
