@@ -18,7 +18,9 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
 #include <string>
+#include <set>
 #include <unordered_map>
 #include <fstream>
 #include "IbkrCryptoStrat.hpp"
@@ -34,6 +36,7 @@
 #include "EReaderOSSignal.h"
 #include "Contract.h"
 #include "Order.h"
+#include "Decimal.h"          // DecimalFunctions::doubleToDecimal — Order.totalQuantity is bid64
 
 using namespace ibkrcrypto;
 
@@ -57,8 +60,8 @@ static Contract sqf_contract(const SqfContract& sc){
 
 class IbkrCryptoEngine : public DefaultEWrapper {
 public:
-    IbkrCryptoEngine(bool live)
-        : live_(live), risk_(account_usd()) {
+    IbkrCryptoEngine(bool live, bool flatten=false)
+        : live_(live), flatten_(flatten), risk_(account_usd()) {
         risk_.new_day();
         cli_ = std::make_unique<EClientSocket>(this,&sig_);
         // build the validated roster
@@ -66,6 +69,9 @@ public:
             const SqfContract* sc = find_sqf(e.sym);
             if(!sc || sc->unit<=0) continue;
             slots_.push_back({e.sym, sc, IbkrCryptoStrat(e.mode), 0.0, 0});
+            // roster scope for PANIC flatten: only close OUR SQF legs on the
+            // shared account, never another fleet member's positions.
+            crypto_ib_syms_.insert(sc->ib_symbol);
         }
     }
 
@@ -78,6 +84,11 @@ public:
 
     void nextValidId(OrderId id) override { nextId_=id;
         std::printf("[IBKRCRYPTO] connected, nextValidId=%ld clientId=88\n",(long)id);
+        if(flatten_){
+            std::printf("[IBKRCRYPTO] PANIC FLATTEN mode: requesting positions (roster-scoped, live=%d)\n",live_);
+            cli_->reqPositions();   // -> position() sweep, close only our SQF legs
+            return;
+        }
         resolve_and_subscribe_();
     }
 
@@ -95,6 +106,25 @@ public:
 
     void error(int id,int code,const std::string& msg,const std::string&) override {
         if(code!=2104&&code!=2106&&code!=2158) std::fprintf(stderr,"[IBKRCRYPTO] err %d: %s\n",code,msg.c_str());
+    }
+
+    // PANIC FLATTEN — close ONLY our roster's SQF legs on the shared account.
+    // Roster scope (crypto_ib_syms_) means we never touch another Omega ibkr
+    // fleet member's positions on the same clientId-88 account.
+    void position(const std::string&,const Contract& c,Decimal pos,double) override {
+        if(!flatten_) return;
+        if(!crypto_ib_syms_.count(c.symbol)) return;            // not our leg — leave it
+        double q = DecimalFunctions::decimalToDouble(pos);
+        if(q==0.0) return;
+        Order o; o.action = q>0?"SELL":"BUY"; o.orderType="MKT";
+        o.totalQuantity = DecimalFunctions::doubleToDecimal(std::fabs(q));
+        std::printf("[IBKRCRYPTO][FLATTEN] %s pos=%.4f -> %s %.4f (live=%d)\n",
+                    c.symbol.c_str(),q,o.action.c_str(),std::fabs(q),live_);
+        if(live_) cli_->placeOrder(nextId_++,c,o);              // SHADOW prints only, no order
+    }
+    void positionEnd() override {
+        std::printf("[IBKRCRYPTO][FLATTEN] sweep complete (live=%d)\n",live_);
+        cli_->cancelPositions();
     }
 
 private:
@@ -122,7 +152,8 @@ private:
         int contracts = coin_to_contracts(sl.sym, notional/px);
         log_(sl.sym, want, contracts, px, mult);
         if(live_ && want!=0 && contracts!=0){
-            Order o; o.action = want>0?"BUY":"SELL"; o.orderType="MKT"; o.totalQuantity=std::abs(contracts);
+            Order o; o.action = want>0?"BUY":"SELL"; o.orderType="MKT";
+            o.totalQuantity = DecimalFunctions::doubleToDecimal((double)std::abs(contracts));
             cli_->placeOrder(nextId_++, sqf_contract(*sl.sc), o);
         }
         sl.pos=want;
@@ -142,18 +173,23 @@ private:
         st<<"]}";
     }
 
-    bool live_; OrderId nextId_=0;
+    bool live_; bool flatten_; OrderId nextId_=0;
     EReaderOSSignal sig_{2000};
     std::unique_ptr<EClientSocket> cli_; std::unique_ptr<EReader> rd_;
     std::vector<Slot> slots_; std::unordered_map<int,int> rid_to_slot_;
+    std::set<std::string> crypto_ib_syms_;   // roster scope for panic flatten
     RiskManager risk_;
 };
 
 int main(int argc,char**argv){
     setvbuf(stdout,nullptr,_IONBF,0);
-    int port=4002; bool live=false;
-    for(int i=1;i<argc;++i){ if(!strcmp(argv[i],"--live")) live=true; else port=atoi(argv[i]); }
-    IbkrCryptoEngine e(live);
+    int port=4002; bool live=false; bool flatten=false;
+    for(int i=1;i<argc;++i){
+        if(!strcmp(argv[i],"--live")) live=true;
+        else if(!strcmp(argv[i],"--flatten")) flatten=true;
+        else port=atoi(argv[i]);
+    }
+    IbkrCryptoEngine e(live,flatten);
     if(!e.connect("127.0.0.1",port,88)){ std::printf("connect failed\n"); return 1; }
     for(int i=0;i<2000;++i) e.pump();
     e.cli()->eDisconnect(); std::printf("[IBKRCRYPTO] session end\n"); return 0;

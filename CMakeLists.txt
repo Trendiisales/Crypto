@@ -64,6 +64,8 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/src/ibkrcrypto_engine.cpp)
     target_compile_definitions(ibkrcrypto_engine PRIVATE OMEGA_WITH_IBKR)
     target_include_directories(ibkrcrypto_engine PRIVATE ${TWSAPI})
     file(GLOB TWS_SRC ${TWSAPI}/*.cpp)
-    target_sources(ibkrcrypto_engine PRIVATE ${TWS_SRC})
+    # TWS DecimalFunctions needs Intel bid64 symbols; order sizes are integers, so
+    # link the integer-exact BID64 shim instead of the full Intel RDFP lib (fleet pattern).
+    target_sources(ibkrcrypto_engine PRIVATE ${TWS_SRC} ${CMAKE_SOURCE_DIR}/third_party/bid64_integer.cpp)
   endif()
 endif()
