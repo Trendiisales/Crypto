@@ -95,7 +95,9 @@ public:
         // realize exactly those positions. Recomputing signals here diverges from the book
         // (different roster/n_open, no corr-downsize) -> 3x mis-sizing was observed.
         tgt_net_ = load_state_targets_();   // also fills spot_tgt_usd_ (long-only spot)
-        compute_csm_spot_targets_();        // CSM sleeve: the live producer of spot targets
+        compute_trend_spot_targets_();      // live producer: per-coin emax trend ([[PaxosTrendBasket]]).
+                                            // compute_csm_spot_targets_() retired -- CSM FAILED OOS on
+                                            // the Paxos universe; kept for reference, not called.
     }
 
     // Live SPOT sleeve -- the ONLY producer of spot targets (no shadow book emits spot
@@ -145,6 +147,67 @@ public:
                         sp->ib_symbol, kv.second, usd, mark);
         }
         if(!bull) std::printf("[IBKRCRYPTO][CSM] BEAR regime (BTC<200DMA) -> all cash, no spot targets\n");
+    }
+
+    // Ordered close vector (by day) for a coin's daily CSV, oldest->newest.
+    static std::vector<double> daily_closes_(const std::string& internal){
+        std::string u; for(char ch:internal) u+=(char)std::toupper((unsigned char)ch);
+        auto m = CrossSectionalAllocator::load_daily_csv(crypto::csv_dir()+"/"+u+"_1d.csv");
+        std::vector<double> v; v.reserve(m.size());
+        for(const auto& kv:m) v.push_back(kv.second);   // std::map -> key(day)-ordered
+        return v;
+    }
+    static double ema_last_(const std::vector<double>& xs, int n){
+        if(xs.empty()) return NAN;
+        double k=2.0/(n+1.0), e=xs[0];
+        for(size_t i=1;i<xs.size();++i) e += k*(xs[i]-e);
+        return e;
+    }
+
+    // Live SPOT sleeve (THE live producer) -- per-coin long-only TREND, the validated
+    // [[PaxosTrendBasket]] edge. CSM ranked cross-sectionally and FAILED OOS on the
+    // Paxos-tradeable universe (14-coin 2025 -28%); the per-coin emax(20/50) trend
+    // basket SURVIVES OOS (+32% holdout, PF2.14, 8/14 breadth, cost-insensitive) --
+    // same engine as [[DogeLongOnlyTrend]]. Rule per coin: BTC>200DMA gate AND
+    // ema20>ema50 on that coin -> LONG; equal risk budget across in-trend coins; tiny
+    // book. Fills spot_tgt_usd_ (route_ places MKT+cashQty+IOC, SHADOW unless --live).
+    // Book = IBKRCRYPTO_SPOT_BOOK_USD (abs) else 20%% of account (alt-trend is high-DD;
+    // keep small, operator sizes via env).
+    void compute_trend_spot_targets_(){
+        double book = std::strtod(crypto::env_or("IBKRCRYPTO_SPOT_BOOK_USD","").c_str(),nullptr);
+        if(book<=0.0) book = account_usd()*0.20;
+        auto btc = daily_closes_("btcusdt");
+        if((int)btc.size() < 201){
+            std::fprintf(stderr,"[IBKRCRYPTO][TREND] BTC daily <201 bars -> cannot gate, spot sleeve INERT\n");
+            return;
+        }
+        double btc_sma200=0.0; for(size_t j=btc.size()-200;j<btc.size();++j) btc_sma200+=btc[j];
+        btc_sma200/=200.0;
+        bool bull = btc.back() > btc_sma200;
+        // pass 1: pick coins in trend under a bull regime
+        std::vector<std::pair<std::string,double>> picks;   // (ib_symbol, mark)
+        if(bull){
+            for(const auto& sp : spot_table()){
+                auto cl = daily_closes_(sp.internal);
+                if((int)cl.size() < 60) continue;            // need >=50 for ema50 + slack
+                double ef=ema_last_(cl,20), es=ema_last_(cl,50);
+                if(!(ef==ef) || !(es==es) || ef<=es) continue;   // long only when ema20>ema50
+                picks.emplace_back(sp.ib_symbol, cl.back());
+            }
+        }
+        std::printf("[IBKRCRYPTO][TREND] book=$%.0f bull=%d picks=%zu (emax 20/50, BTC>200DMA gate)\n",
+                    book, (int)bull, picks.size());
+        if(picks.empty()){
+            std::printf("[IBKRCRYPTO][TREND] %s -> all cash, no spot targets\n",
+                        bull? "no coin in trend" : "BEAR regime (BTC<200DMA)");
+            return;
+        }
+        double usd = book / (double)picks.size();           // equal risk budget
+        for(const auto& pk : picks){
+            spot_tgt_usd_[pk.first] += usd;
+            if(pk.second>0.0) tgt_px_[pk.first] = pk.second;
+            std::printf("[IBKRCRYPTO][TREND]   %-5s -> $%.2f mark=%.4f\n", pk.first.c_str(), usd, pk.second);
+        }
     }
 
     bool connect(const char* host,int port,int id){
