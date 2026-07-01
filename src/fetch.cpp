@@ -63,8 +63,15 @@ static std::string f2(double v) { char b[64]; std::snprintf(b, sizeof b, "%.2f",
 
 // ========================= daily (fetch_crypto.py) =========================
 static int run_daily() {
+    // Full CSM spot-sleeve universe (the Paxos-tradeable coins the CrossSectionalAllocator
+    // ranks). Was BTC/ETH/SOL only -> the other 6 daily CSVs went stale (not refreshed),
+    // so the live CSM sleeve ranked on stale momentum. All 14 now refresh daily.
     const std::vector<std::pair<std::string,std::string>> PAIRS{
-        {"BTCUSDT", "BTCUSDT_1d.csv"}, {"ETHUSDT", "ETHUSDT_1d.csv"}, {"SOLUSDT", "SOLUSDT_1d.csv"}};
+        {"BTCUSDT","BTCUSDT_1d.csv"}, {"ETHUSDT","ETHUSDT_1d.csv"}, {"SOLUSDT","SOLUSDT_1d.csv"},
+        {"ADAUSDT","ADAUSDT_1d.csv"}, {"BCHUSDT","BCHUSDT_1d.csv"}, {"DOGEUSDT","DOGEUSDT_1d.csv"},
+        {"LINKUSDT","LINKUSDT_1d.csv"}, {"LTCUSDT","LTCUSDT_1d.csv"}, {"XRPUSDT","XRPUSDT_1d.csv"},
+        {"AVAXUSDT","AVAXUSDT_1d.csv"}, {"UNIUSDT","UNIUSDT_1d.csv"}, {"NEARUSDT","NEARUSDT_1d.csv"},
+        {"LDOUSDT","LDOUSDT_1d.csv"}, {"AAVEUSDT","AAVEUSDT_1d.csv"}};
     long long now_ms = (long long)std::time(nullptr) * 1000;
     int rc = 0;
     for (auto& [sym, fname] : PAIRS) {
@@ -72,7 +79,7 @@ static int run_daily() {
         try {
             long long last_ot = last_open_ms(path);
             std::vector<std::string> added;
-            json ks = get_json(binance_klines_url(sym, "1d", 0, 10), 15);
+            json ks = get_json(binance_klines_url(sym, "1d", 0, 30), 15);  // 30 bars: close multi-day gaps
             for (auto& k : ks) {
                 long long ot = k[0].get<long long>(), ct = k[6].get<long long>();
                 if (ot > last_ot && ct < now_ms) {        // newer AND completed only
