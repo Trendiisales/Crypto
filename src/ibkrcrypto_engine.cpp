@@ -62,6 +62,15 @@ static Contract sqf_contract(const SqfContract& sc){
     return c;
 }
 
+// Build an IBKR/Paxos SPOT-crypto contract (long-only, cashQty-sized). Distinct
+// from the SQF future: secType CRYPTO on PAXOS. No conId resolution needed --
+// symbol+exchange+currency+secType fully qualify a Paxos spot contract.
+static Contract spot_contract(const SpotContract& sp){
+    Contract c; c.symbol=sp.ib_symbol; c.secType="CRYPTO";
+    c.exchange="PAXOS"; c.currency="USD";
+    return c;
+}
+
 class IbkrCryptoEngine : public DefaultEWrapper {
 public:
     IbkrCryptoEngine(bool live, bool flatten=false, bool probe=false)
@@ -77,11 +86,14 @@ public:
             // shared account, never another fleet member's positions.
             crypto_ib_syms_.insert(sc->ib_symbol);
         }
+        // Spot (Paxos) roster scope: register every spot ib_symbol so position sync
+        // records our fractional-coin spot holdings for idempotent delta routing.
+        for(const auto& sp : spot_table()) crypto_ib_syms_.insert(sp.ib_symbol);
         // Targets are the VALIDATED shadow book (shadow_refresh -> state.json), NOT an
         // independent recompute. The engine only resolves conIds + routes delta orders to
         // realize exactly those positions. Recomputing signals here diverges from the book
         // (different roster/n_open, no corr-downsize) -> 3x mis-sizing was observed.
-        tgt_net_ = load_state_targets_();
+        tgt_net_ = load_state_targets_();   // also fills spot_tgt_usd_ (long-only spot)
     }
 
     bool connect(const char* host,int port,int id){
@@ -269,14 +281,32 @@ public:
             std::string coin = key.substr(0, key.find('_'));
             std::string internal = (coin=="ndx") ? "ndx" : coin+"usdt";
             const SqfContract* sc = find_sqf(internal);
-            if(!sc){ std::fprintf(stderr,"[IBKRCRYPTO][TGT] %s (%s) not IB-SQF-tradeable -> shadow-only, skip\n",
-                                  key.c_str(),coin.c_str()); continue; }
+            if(!sc){
+                // Not an SQF future. If it's a spot-eligible coin, route it as a
+                // LONG-ONLY Paxos spot leg sized in USD (cashQty); else shadow-only.
+                const SpotContract* sp2 = find_spot(internal);
+                if(!sp2){ std::fprintf(stderr,"[IBKRCRYPTO][TGT] %s (%s) not SQF nor spot-eligible -> shadow-only, skip\n",
+                                       key.c_str(),coin.c_str()); continue; }
+                if(pos<=0){ std::printf("[IBKRCRYPTO][TGT] %-10s spot pos=%+d -> flat (long-only)\n",key.c_str(),pos); continue; }
+                // USD notional: explicit slot "usd" wins; else default per-name book
+                // fraction (IBKRCRYPTO_SPOT_USD_PER_NAME, default 15%% of account).
+                double usd = sl.value("usd", 0.0);
+                if(usd<=0.0){
+                    double frac = std::strtod(crypto::env_or("IBKRCRYPTO_SPOT_USD_PER_NAME","").c_str(),nullptr);
+                    usd = (frac>0.0? frac : account_usd()*0.15);
+                }
+                spot_tgt_usd_[sp2->ib_symbol] += usd;
+                if(sl.contains("entry_px")) tgt_px_[sp2->ib_symbol] = sl.value("entry_px",0.0);
+                std::printf("[IBKRCRYPTO][TGT] %-10s SPOT long pos=%+d -> %s usd=%.2f\n",
+                            key.c_str(),pos,sp2->ib_symbol,spot_tgt_usd_[sp2->ib_symbol]);
+                continue;
+            }
             net[sc->ib_symbol] += (pos>0? ct : -ct);
             if(sl.contains("entry_px")) tgt_px_[sc->ib_symbol] = sl.value("entry_px",0.0);
             std::printf("[IBKRCRYPTO][TGT] %-10s pos=%+d ct=%d -> %s net=%+d\n",
                         key.c_str(),pos,ct,sc->ib_symbol.c_str(),net[sc->ib_symbol]);
         }
-        std::printf("[IBKRCRYPTO] loaded %zu SQF target(s) from %s\n",net.size(),sp.c_str());
+        std::printf("[IBKRCRYPTO] loaded %zu SQF + %zu spot target(s) from %s\n",net.size(),spot_tgt_usd_.size(),sp.c_str());
         return net;
     }
 
@@ -368,6 +398,63 @@ private:
                             o.action.c_str(), sym.c_str(), std::abs(delta), (long)con[sym].conId);
             }
         }
+        // --- SPOT (Paxos, long-only, USD-notional via cashQty) -----------------
+        // Distinct route from SQF: MKT+cashQty BUY / MKT+totalQuantity SELL, tif IOC
+        // (Paxos spot MKT BUY REQUIRES cashQty -> err 10289 otherwise; spot MKT
+        // REJECTS DAY tif -> must be IOC). spot_tgt_usd_ holds LONG-ONLY USD targets;
+        // a held spot leg with no target is closed to flat. NEVER sells more coin
+        // than held (long-only invariant, mirrors [[BearSpotNoEdge]] gate upstream).
+        constexpr double MIN_USD = 5.0;   // dust threshold; skip sub-$5 rebalances
+        std::set<std::string> spot_syms;
+        for(auto& kv:spot_tgt_usd_) spot_syms.insert(kv.first);
+        for(auto& kv:cur_pos_)      // held-but-untargeted spot legs -> close to flat
+            for(auto& sc:spot_table()) if(kv.first==sc.ib_symbol){ spot_syms.insert(kv.first); break; }
+        for(const std::string& sym:spot_syms){
+            const SpotContract* sp=nullptr;
+            for(auto& sc:spot_table()) if(sym==sc.ib_symbol){ sp=&sc; break; }
+            if(!sp) continue;
+            double mark     = tgt_px_.count(sym)?tgt_px_[sym]:0.0;
+            double cur_coin = cur_pos_.count(sym)?cur_pos_[sym]:0.0;
+            double tgt_usd  = spot_tgt_usd_.count(sym)?spot_tgt_usd_[sym]:0.0;
+            Contract c=spot_contract(*sp);
+            // (a) flat/no target but coin held -> full close (needs no mark)
+            if(tgt_usd<=MIN_USD){
+                if(cur_coin<=0.0) continue;   // already flat (long-only never short)
+                led<<sym<<"(spot),0,"<<cur_coin<<",CLOSE,"<<mark<<","<<(live_?"LIVE":"SHADOW")<<"\n";
+                Order o; o.action="SELL"; o.orderType="MKT"; o.tif="IOC";
+                o.totalQuantity=DecimalFunctions::doubleToDecimal(cur_coin);
+                if(live_){ cli_->placeOrder(nextId_++,c,o);
+                    std::printf("[IBKRCRYPTO][LIVE] SPOT CLOSE SELL %s %.8f coin @ MKT IOC\n",sym.c_str(),cur_coin);
+                } else std::printf("[IBKRCRYPTO][SHADOW] would SPOT CLOSE SELL %s %.8f coin\n",sym.c_str(),cur_coin);
+                continue;
+            }
+            // (b) live USD target -> rebalance; needs a mark to size current notional
+            if(mark<=0.0){
+                std::fprintf(stderr,"[IBKRCRYPTO][%s] WARN spot %s target $%.2f but no mark (px<=0) -> cannot size, skip\n",
+                             live_?"LIVE":"SHADOW",sym.c_str(),tgt_usd);
+                continue;
+            }
+            double cur_usd   = cur_coin*mark;
+            double delta_usd = tgt_usd - cur_usd;
+            led<<sym<<"(spot),"<<tgt_usd<<","<<cur_usd<<","<<delta_usd<<","<<mark<<","<<(live_?"LIVE":"SHADOW")<<"\n";
+            std::printf("[IBKRCRYPTO][%s] %-4s(spot) tgt_usd=%.2f cur_usd=%.2f delta_usd=%+.2f mark=%.2f\n",
+                        live_?"LIVE":"SHADOW",sym.c_str(),tgt_usd,cur_usd,delta_usd,mark);
+            if(std::fabs(delta_usd)<MIN_USD) continue;
+            if(delta_usd>0){   // BUY more: cashQty notional
+                Order o; o.action="BUY"; o.orderType="MKT"; o.cashQty=delta_usd; o.tif="IOC";
+                if(live_){ cli_->placeOrder(nextId_++,c,o);
+                    std::printf("[IBKRCRYPTO][LIVE] SPOT ORDER BUY %s cashQty=$%.2f @ MKT IOC\n",sym.c_str(),delta_usd);
+                } else std::printf("[IBKRCRYPTO][SHADOW] would SPOT BUY %s $%.2f\n",sym.c_str(),delta_usd);
+            } else {           // SELL down: coin, capped at held (long-only)
+                double want=(-delta_usd)/mark, sell_coin=(want<cur_coin?want:cur_coin);
+                if(sell_coin<=0.0) continue;
+                Order o; o.action="SELL"; o.orderType="MKT"; o.tif="IOC";
+                o.totalQuantity=DecimalFunctions::doubleToDecimal(sell_coin);
+                if(live_){ cli_->placeOrder(nextId_++,c,o);
+                    std::printf("[IBKRCRYPTO][LIVE] SPOT ORDER SELL %s %.8f coin @ MKT IOC\n",sym.c_str(),sell_coin);
+                } else std::printf("[IBKRCRYPTO][SHADOW] would SPOT SELL %s %.8f coin\n",sym.c_str(),sell_coin);
+            }
+        }
         write_state_();
         std::printf("[IBKRCRYPTO] route complete\n");
     }
@@ -402,6 +489,7 @@ private:
     std::unordered_map<std::string,double> cur_pos_;  // current IB net position per SQF ib_symbol
     std::unordered_map<std::string,int> tgt_net_;     // net signed SQF contracts from validated state.json (authoritative target)
     std::unordered_map<std::string,double> tgt_px_;   // per-symbol entry mark from state.json (ledger only)
+    std::unordered_map<std::string,double> spot_tgt_usd_;  // LONG-ONLY spot targets, USD notional per Paxos ib_symbol (cashQty)
 };
 
 int main(int argc,char**argv){

@@ -73,6 +73,39 @@ inline const SqfContract* find_sqf(const std::string& internal) {
     return nullptr;
 }
 
+// SPOT-crypto roster (IBKR/Paxos). These are LONG-ONLY (no short) and size in
+// USD notional via Order.cashQty (not integer contracts). Distinct eligibility
+// regime from SQF: verified spot-eligible on paper 4002 2026-07-02 (Gateway
+// Transmit dialog). Only coins listed here route as spot; anything else that is
+// neither SQF nor spot stays shadow-only. `ib_symbol` is the Paxos underlying
+// (the coin ticker); exchange PAXOS, currency USD, secType CRYPTO.
+struct SpotContract { const char* internal; const char* ib_symbol; const char* display; };
+inline const std::vector<SpotContract>& spot_table() {
+    static const std::vector<SpotContract> t = {
+        // internal      ib_sym  display
+        {"btcusdt",  "BTC",  "BTC spot (Paxos)"},
+        {"ethusdt",  "ETH",  "ETH spot (Paxos)"},
+        {"solusdt",  "SOL",  "SOL spot (Paxos)"},
+        {"dogeusdt", "DOGE", "DOGE spot (Paxos)"},
+        {"adausdt",  "ADA",  "ADA spot (Paxos)"},
+        {"avaxusdt", "AVAX", "AVAX spot (Paxos)"},
+        {"linkusdt", "LINK", "LINK spot (Paxos)"},
+        {"ltcusdt",  "LTC",  "LTC spot (Paxos)"},
+        {"bchusdt",  "BCH",  "BCH spot (Paxos)"},
+        {"uniusdt",  "UNI",  "UNI spot (Paxos)"},
+        {"nearusdt", "NEAR", "NEAR spot (Paxos)"},
+        {"ldousdt",  "LDO",  "LDO spot (Paxos)"},
+        {"aaveusdt", "AAVE", "AAVE spot (Paxos)"},
+        {"xrpusdt",  "XRP",  "XRP spot (Paxos)"},
+    };
+    return t;
+}
+
+inline const SpotContract* find_spot(const std::string& internal) {
+    for (const auto& c : spot_table()) if (c.internal == internal) return &c;
+    return nullptr;
+}
+
 // Convert a coin-notional target (how Chimera engines size) into a whole number
 // of SQF contracts. Returns 0 if the symbol is not a live SQF (size==0).
 inline int coin_to_contracts(const std::string& internal, double coin_qty) {
