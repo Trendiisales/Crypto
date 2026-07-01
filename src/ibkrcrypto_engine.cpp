@@ -29,6 +29,7 @@
 #include "CmeSqfContracts.hpp"
 #include "RiskManager.hpp"            // vendored from Omega/ibkr (catastrophe caps)
 #include "crypto/Roster.hpp"         // crypto::data_dir() — env-overridable output dir
+#include "json.hpp"                  // nlohmann — read the validated shadow state.json
 
 #ifdef OMEGA_WITH_IBKR
 #include "EWrapper.h"
@@ -75,6 +76,11 @@ public:
             // shared account, never another fleet member's positions.
             crypto_ib_syms_.insert(sc->ib_symbol);
         }
+        // Targets are the VALIDATED shadow book (shadow_refresh -> state.json), NOT an
+        // independent recompute. The engine only resolves conIds + routes delta orders to
+        // realize exactly those positions. Recomputing signals here diverges from the book
+        // (different roster/n_open, no corr-downsize) -> 3x mis-sizing was observed.
+        tgt_net_ = load_state_targets_();
     }
 
     bool connect(const char* host,int port,int id){
@@ -91,20 +97,19 @@ public:
             cli_->reqPositions();   // -> position() sweep, close only our SQF legs
             return;
         }
-        resolve_and_subscribe_();
+        // Non-flatten: sync current IB positions FIRST (roster-scoped) so route_ can
+        // order the DELTA to target, not the full target -- makes the daily cron run
+        // idempotent (no doubling-up each day). resolve+warm+route fire from positionEnd.
+        syncing_=true;
+        std::printf("[IBKRCRYPTO] position sync (reqPositions) before routing\n");
+        cli_->reqPositions();
     }
 
-    // historicalData / historicalDataUpdate feed daily bars into each strat.
-    void historicalData(TickerId rid,const ::Bar& b) override {
-        int s=rid_to_slot_[rid]; if(s<0) return;
-        ibkrcrypto::Bar bar{ b.open, b.high, b.low, b.close };
-        slots_[s].last_close = b.close;
-        slots_[s].strat.on_daily_bar(bar);
-    }
-    void historicalDataEnd(int rid,const std::string&,const std::string&) override {
-        int s=rid_to_slot_[rid]; if(s<0||!slots_[s].strat.warm()) return;
-        decide_(s, slots_[s].last_close);
-    }
+    // NOTE: warm is now CSV-only (SQF HMDS has no usable daily history), so no
+    // reqHistoricalData is issued and these IB historical callbacks never fire. Kept as
+    // no-ops in case a future venue supplies SQF daily bars. See warm_from_csv_ / route_.
+    void historicalData(TickerId,const ::Bar&) override {}
+    void historicalDataEnd(int,const std::string&,const std::string&) override {}
 
     void error(int id,int code,const std::string& msg,const std::string&) override {
         if(code!=2104&&code!=2106&&code!=2158) std::fprintf(stderr,"[IBKRCRYPTO] err %d: %s\n",code,msg.c_str());
@@ -114,9 +119,10 @@ public:
     // Roster scope (crypto_ib_syms_) means we never touch another Omega ibkr
     // fleet member's positions on the same clientId-88 account.
     void position(const std::string&,const Contract& c,Decimal pos,double) override {
-        if(!flatten_) return;
         if(!crypto_ib_syms_.count(c.symbol)) return;            // not our leg — leave it
         double q = DecimalFunctions::decimalToDouble(pos);
+        if(syncing_){ cur_pos_[c.symbol]+=q; return; }          // record for order-diff
+        if(!flatten_) return;
         if(q==0.0) return;
         Order o; o.action = q>0?"SELL":"BUY"; o.orderType="MKT";
         o.totalQuantity = DecimalFunctions::doubleToDecimal(std::fabs(q));
@@ -125,6 +131,13 @@ public:
         if(live_) cli_->placeOrder(nextId_++,c,o);              // SHADOW prints only, no order
     }
     void positionEnd() override {
+        if(syncing_){
+            syncing_=false; cli_->cancelPositions();
+            std::printf("[IBKRCRYPTO] position sync done: %zu roster leg(s) held\n",cur_pos_.size());
+            for(auto& kv:cur_pos_) std::printf("[IBKRCRYPTO]   cur %s = %.4f\n",kv.first.c_str(),kv.second);
+            resolve_and_subscribe_();
+            return;
+        }
         std::printf("[IBKRCRYPTO][FLATTEN] sweep complete (live=%d)\n",live_);
         cli_->cancelPositions();
     }
@@ -147,17 +160,47 @@ public:
         auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
         int s=it->second; Slot& sl=slots_[s];
         if(!sl.has_con){ std::fprintf(stderr,"[IBKRCRYPTO] UNRESOLVED %s (%s) — no CME def, slot idle\n",
-                                      sl.sym.c_str(),sl.sc->ib_symbol.c_str()); return; }
+                                      sl.sym.c_str(),sl.sc->ib_symbol.c_str()); maybe_route_(); return; }
         std::printf("[IBKRCRYPTO] resolved %s -> %s conId=%ld exp=%s\n",
                     sl.sym.c_str(),sl.resolved.localSymbol.c_str(),(long)sl.resolved.conId,sl.front_expiry.c_str());
-        // Warm from the local validated daily CSV (SQF HMDS has no usable history).
-        if(warm_from_csv_(sl)) decide_(s, sl.last_close);
-        else std::fprintf(stderr,"[IBKRCRYPTO] %s NOT WARM after CSV -> slot idle\n",sl.sym.c_str());
+        maybe_route_();
+    }
+    // Route once every slot's contractDetails has returned (resolved or not), so con[] is
+    // populated for all SQF symbols before we diff targets against current positions.
+    void maybe_route_(){ if(++cd_ends_ >= (int)slots_.size()) route_(); }
+
+    // Net signed SQF contracts per ib_symbol from the validated shadow state.json.
+    // Each shadow slot: key ("btc_emax"/"sol_roc"/"ndx_tsmom"), pos (-1/0/+1), contracts.
+    // Legs whose coin has no CME SQF on IB (SOL — QSOL not listed) are shadow-only -> skip
+    // (the live book is the SQF-tradeable subset until QSOL lists). tgt_px_ keeps a mark for
+    // the ledger only.
+    std::unordered_map<std::string,int> load_state_targets_(){
+        std::unordered_map<std::string,int> net;
+        const std::string sp = crypto::env_or("IBKRCRYPTO_STATE", crypto::data_dir()+"/state.json");
+        std::ifstream f(sp);
+        if(!f){ std::fprintf(stderr,"[IBKRCRYPTO] state.json missing at %s -> no targets\n",sp.c_str()); return net; }
+        nlohmann::json j; try { f>>j; } catch(...){ std::fprintf(stderr,"[IBKRCRYPTO] state.json parse fail %s\n",sp.c_str()); return net; }
+        for(const auto& sl : j.value("slots", nlohmann::json::array())){
+            int pos = sl.value("pos",0); int ct = sl.value("contracts",0);
+            if(pos==0 || ct==0) continue;
+            std::string key = sl.value("key", std::string());
+            std::string coin = key.substr(0, key.find('_'));
+            std::string internal = (coin=="ndx") ? "ndx" : coin+"usdt";
+            const SqfContract* sc = find_sqf(internal);
+            if(!sc){ std::fprintf(stderr,"[IBKRCRYPTO][TGT] %s (%s) not IB-SQF-tradeable -> shadow-only, skip\n",
+                                  key.c_str(),coin.c_str()); continue; }
+            net[sc->ib_symbol] += (pos>0? ct : -ct);
+            if(sl.contains("entry_px")) tgt_px_[sc->ib_symbol] = sl.value("entry_px",0.0);
+            std::printf("[IBKRCRYPTO][TGT] %-10s pos=%+d ct=%d -> %s net=%+d\n",
+                        key.c_str(),pos,ct,sc->ib_symbol.c_str(),net[sc->ib_symbol]);
+        }
+        std::printf("[IBKRCRYPTO] loaded %zu SQF target(s) from %s\n",net.size(),sp.c_str());
+        return net;
     }
 
 private:
     struct Slot { std::string sym; const SqfContract* sc; IbkrCryptoStrat strat; double last_close; int pos;
-                  Contract resolved; bool has_con=false; std::string front_expiry; };
+                  Contract resolved; bool has_con=false; std::string front_expiry; int target=0; };
 
     // Map a roster symbol ("btcusdt"/"ethusdt"/"solusdt"/"ndx") to its validated
     // daily-OHLC CSV (the same series the backtest + shadow book use).
@@ -203,29 +246,48 @@ private:
                     slots_.size(),!live_,account_usd());
     }
 
-    void decide_(int s, double px){
-        Slot& sl=slots_[s];
-        int want = sl.strat.target();
-        double mult = sl.strat.size_mult();
-        if(want==sl.pos) return;
-        // size via RiskManager catastrophe caps * vol-target mult, then -> SQF contracts
-        double notional = risk_.allow_entry(sl.sym, px, px) * mult;
-        int contracts = coin_to_contracts(sl.sym, notional/px);
-        log_(sl.sym, want, contracts, px, mult);
-        if(live_ && want!=0 && contracts!=0){
-            Order o; o.action = want>0?"BUY":"SELL"; o.orderType="MKT";
-            o.totalQuantity = DecimalFunctions::doubleToDecimal((double)std::abs(contracts));
-            cli_->placeOrder(nextId_++, sl.has_con?sl.resolved:sqf_contract(*sl.sc), o);
-        }
-        sl.pos=want;
-    }
-
-    void log_(const std::string& sym,int want,int contracts,double px,double mult){
+    // Route ALL targets in one pass (called once every contractDetails has returned).
+    // Targets MIRROR the validated shadow book EXACTLY: tgt_net_ is the net signed SQF
+    // contract count per conId taken straight from state.json's `contracts` field
+    // (load_state_targets_). NO independent re-sizing -- the engine is a pure executor of
+    // the shadow book, so the live position is bar-for-bar the shadow book's. An
+    // independent per-leg pool sizer was tried and diverged (ETH -> 3 vs shadow's 1)
+    // because this engine's roster differs from shadow_refresh (missing btc_roc/sol_roc +
+    // SOL legs, extra btc_ibs; cannot reproduce n_open / corr-downsize). The vendored
+    // equity RiskManager is retained only as a future catastrophe hook -- never sizes here.
+    void route_(){
+        std::unordered_map<std::string,int> net = tgt_net_;   // authoritative: shadow state.json
+        std::unordered_map<std::string,Contract> con;         // resolved front contract per symbol
+        for(auto& s:slots_){ if(s.has_con) con[s.sc->ib_symbol]=s.resolved; }
+        // include currently-held roster symbols with no target so they get CLOSED to flat
+        for(auto& kv:cur_pos_) net.emplace(kv.first,0);
+        std::printf("[IBKRCRYPTO] routing: %zu target sym(s) live=%d\n", tgt_net_.size(), live_);
+        // one netted MKT order per SQF conId: delta = net_target - current_position (idempotent)
         std::ofstream led(crypto::data_dir()+"/daily_ledger.csv",std::ios::app);
-        led<<sym<<","<<want<<","<<contracts<<","<<px<<","<<mult<<","<<(live_?"LIVE":"SHADOW")<<"\n";
-        std::printf("[IBKRCRYPTO][%s] %s target=%d contracts=%d px=%.2f vt=%.2f\n",
-            live_?"LIVE":"SHADOW", sym.c_str(), want, contracts, px, mult);
-        write_state_();   // refresh GUI state.json
+        for(auto& kv:net){
+            const std::string& sym=kv.first; int tgt=kv.second;
+            int cur=(int)std::llround(cur_pos_.count(sym)?cur_pos_[sym]:0.0);
+            int delta=tgt-cur;
+            double mark = tgt_px_.count(sym)?tgt_px_[sym]:0.0;   // shadow entry mark (ledger only; MKT order needs no px)
+            led<<sym<<","<<tgt<<","<<cur<<","<<delta<<","<<mark<<","<<(live_?"LIVE":"SHADOW")<<"\n";
+            std::printf("[IBKRCRYPTO][%s] %-4s net_target=%+d cur=%+d delta=%+d px=%.2f\n",
+                        live_?"LIVE":"SHADOW", sym.c_str(), tgt, cur, delta, mark);
+            if(delta==0) continue;
+            if(!con.count(sym)){
+                std::fprintf(stderr,"[IBKRCRYPTO][%s] WARN %s target %+d (delta %+d) but no resolved contract -> cannot route\n",
+                             live_?"LIVE":"SHADOW", sym.c_str(), tgt, delta);
+                continue;
+            }
+            if(live_){
+                Order o; o.action=delta>0?"BUY":"SELL"; o.orderType="MKT";
+                o.totalQuantity=DecimalFunctions::doubleToDecimal((double)std::abs(delta));
+                cli_->placeOrder(nextId_++, con[sym], o);
+                std::printf("[IBKRCRYPTO][LIVE] ORDER %s %s %d @ MKT (conId=%ld)\n",
+                            o.action.c_str(), sym.c_str(), std::abs(delta), (long)con[sym].conId);
+            }
+        }
+        write_state_();
+        std::printf("[IBKRCRYPTO] route complete\n");
     }
     void write_state_(){
         // MUST NOT be data_dir()/state.json -- that file is the daily-book GUI state
@@ -239,8 +301,10 @@ private:
         const std::string sp = crypto::env_or("IBKRCRYPTO_ENGINE_STATE",
                                                crypto::data_dir()+"/engine_state.json");
         std::ofstream st(sp);
-        st<<"{\"engine\":\"IBKRCrypto\",\"mode\":\""<<(live_?"LIVE":"SHADOW")<<"\",\"slots\":[";
-        for(size_t i=0;i<slots_.size();++i){ if(i)st<<","; st<<"{\"sym\":\""<<slots_[i].sym<<"\",\"pos\":"<<slots_[i].pos<<"}"; }
+        st<<"{\"engine\":\"IBKRCrypto\",\"mode\":\""<<(live_?"LIVE":"SHADOW")<<"\",\"targets\":[";
+        bool first=true;
+        for(auto& kv:tgt_net_){ if(!first)st<<","; first=false;
+            st<<"{\"sym\":\""<<kv.first<<"\",\"net\":"<<kv.second<<"}"; }
         st<<"]}";
     }
 
@@ -250,7 +314,12 @@ private:
     std::vector<Slot> slots_; std::unordered_map<int,int> rid_to_slot_;
     std::unordered_map<int,int> cd_rid_to_slot_;   // reqContractDetails reqId -> slot
     std::set<std::string> crypto_ib_syms_;   // roster scope for panic flatten
-    RiskManager risk_;
+    RiskManager risk_;                        // retained as a future catastrophe hook (sizing now mirrors the shadow book)
+    bool syncing_=false;                      // reqPositions sync in flight (pre-route)
+    int  cd_ends_=0;                          // contractDetailsEnd count -> route when == slots_
+    std::unordered_map<std::string,double> cur_pos_;  // current IB net position per SQF ib_symbol
+    std::unordered_map<std::string,int> tgt_net_;     // net signed SQF contracts from validated state.json (authoritative target)
+    std::unordered_map<std::string,double> tgt_px_;   // per-symbol entry mark from state.json (ledger only)
 };
 
 int main(int argc,char**argv){
