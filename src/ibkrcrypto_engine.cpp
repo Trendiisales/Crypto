@@ -127,18 +127,39 @@ public:
         cli_->cancelPositions();
     }
 
+    // #5 conId resolution: a bare (symbol=QTF,secType=FUT,exchange=CME) is ambiguous
+    // -> err 321 "enter a local symbol or an expiry". reqContractDetails returns the
+    // fully-qualified front contract(s); keep the FRONT (earliest expiry) per slot,
+    // then warm + route orders on the resolved conId.
+    void contractDetails(int reqId,const ContractDetails& cd) override {
+        auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
+        Slot& sl=slots_[it->second];
+        const std::string& exp=cd.contract.lastTradeDateOrContractMonth;
+        if(!sl.has_con || exp<sl.front_expiry){ sl.resolved=cd.contract; sl.has_con=true; sl.front_expiry=exp; }
+    }
+    void contractDetailsEnd(int reqId) override {
+        auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
+        int s=it->second; Slot& sl=slots_[s];
+        if(!sl.has_con){ std::fprintf(stderr,"[IBKRCRYPTO] UNRESOLVED %s (%s) — no CME def, slot idle\n",
+                                      sl.sym.c_str(),sl.sc->ib_symbol.c_str()); return; }
+        int rid=1000+s; rid_to_slot_[rid]=s;
+        std::printf("[IBKRCRYPTO] resolved %s -> %s conId=%ld exp=%s\n",
+                    sl.sym.c_str(),sl.resolved.localSymbol.c_str(),(long)sl.resolved.conId,sl.front_expiry.c_str());
+        cli_->reqHistoricalData(rid,sl.resolved,"","1 Y","1 day","TRADES",1,1,false,TagValueListSPtr());
+    }
+
 private:
-    struct Slot { std::string sym; const SqfContract* sc; IbkrCryptoStrat strat; double last_close; int pos; };
+    struct Slot { std::string sym; const SqfContract* sc; IbkrCryptoStrat strat; double last_close; int pos;
+                  Contract resolved; bool has_con=false; std::string front_expiry; };
 
     void resolve_and_subscribe_(){
-        // For each slot: reqContractDetails (resolve SQF conId/tradingClass) then
-        // reqHistoricalData("1 Y","1 day",MIDPOINT) to warm + reqMktData for live.
+        // Phase 1: resolve each SQF's front conId via reqContractDetails (see contractDetails*).
+        // reqHistoricalData/placeOrder are issued from contractDetailsEnd on the qualified contract.
         for(size_t i=0;i<slots_.size();++i){
-            int rid=1000+(int)i; rid_to_slot_[rid]=(int)i;
-            Contract c=sqf_contract(*slots_[i].sc);
-            cli_->reqHistoricalData(rid,c,"","1 Y","1 day","MIDPOINT",1,1,false,TagValueListSPtr());
+            int cdr=2000+(int)i; cd_rid_to_slot_[cdr]=(int)i;
+            cli_->reqContractDetails(cdr, sqf_contract(*slots_[i].sc));
         }
-        std::printf("[IBKRCRYPTO] %zu SQF slots subscribed (SHADOW=%d) account=$%.0f USD (NZ$5000 @ 0.584)\n",
+        std::printf("[IBKRCRYPTO] resolving %zu SQF contracts (reqContractDetails) SHADOW=%d account=$%.0f USD (NZ$5000 @ 0.584)\n",
                     slots_.size(),!live_,account_usd());
     }
 
@@ -154,7 +175,7 @@ private:
         if(live_ && want!=0 && contracts!=0){
             Order o; o.action = want>0?"BUY":"SELL"; o.orderType="MKT";
             o.totalQuantity = DecimalFunctions::doubleToDecimal((double)std::abs(contracts));
-            cli_->placeOrder(nextId_++, sqf_contract(*sl.sc), o);
+            cli_->placeOrder(nextId_++, sl.has_con?sl.resolved:sqf_contract(*sl.sc), o);
         }
         sl.pos=want;
     }
@@ -177,6 +198,7 @@ private:
     EReaderOSSignal sig_{2000};
     std::unique_ptr<EClientSocket> cli_; std::unique_ptr<EReader> rd_;
     std::vector<Slot> slots_; std::unordered_map<int,int> rid_to_slot_;
+    std::unordered_map<int,int> cd_rid_to_slot_;   // reqContractDetails reqId -> slot
     std::set<std::string> crypto_ib_syms_;   // roster scope for panic flatten
     RiskManager risk_;
 };
