@@ -27,6 +27,7 @@
 #include <cctype>
 #include "IbkrCryptoStrat.hpp"
 #include "CmeSqfContracts.hpp"
+#include "crypto/CrossSectionalAllocator.hpp"   // live spot sleeve (CSM portfolio path)
 #include "RiskManager.hpp"            // vendored from Omega/ibkr (catastrophe caps)
 #include "crypto/Roster.hpp"         // crypto::data_dir() — env-overridable output dir
 #include "json.hpp"                  // nlohmann — read the validated shadow state.json
@@ -94,6 +95,56 @@ public:
         // realize exactly those positions. Recomputing signals here diverges from the book
         // (different roster/n_open, no corr-downsize) -> 3x mis-sizing was observed.
         tgt_net_ = load_state_targets_();   // also fills spot_tgt_usd_ (long-only spot)
+        compute_csm_spot_targets_();        // CSM sleeve: the live producer of spot targets
+    }
+
+    // Live SPOT sleeve -- the ONLY producer of spot targets (no shadow book emits spot
+    // slots). Runs the validated CrossSectionalMomentum allocator over the Paxos coins
+    // that have a daily CSV, LONG-ONLY, BTC>200DMA-gated, inverse-vol weighted; converts
+    // weights -> USD notional and fills spot_tgt_usd_ (route_ then places MKT+cashQty+IOC,
+    // SHADOW unless --live). Book size: IBKRCRYPTO_SPOT_BOOK_USD (abs) else 25%% of account.
+    // Universe note: the OOS validation ([[CrossSectionalMomentum]]) was on the curated
+    // 54-name universe; this deploys the SAME logic on the 9 daily-available Paxos majors.
+    // Treat as live-pending-a-9-coin-OOS-run before sizing the book up.
+    void compute_csm_spot_targets_(){
+        double book = std::strtod(crypto::env_or("IBKRCRYPTO_SPOT_BOOK_USD","").c_str(),nullptr);
+        if(book<=0.0) book = account_usd()*0.25;
+        CrossSectionalAllocator alloc;   // validated lb30/K3/invvol/BTC200 defaults
+        std::unordered_map<std::string,std::map<long,double>> raw;
+        for(const auto& sp : spot_table()){
+            std::string internal = sp.internal;         // e.g. "btcusdt"
+            std::string u; for(char ch:internal) u+=(char)std::toupper((unsigned char)ch);
+            std::string path = crypto::csv_dir()+"/"+u+"_1d.csv";   // e.g. BTCUSDT_1d.csv
+            auto series = CrossSectionalAllocator::load_daily_csv(path);
+            if(series.size() >= (size_t)(alloc.regime_ma+1)) raw[internal]=std::move(series);
+        }
+        if(raw.find(alloc.btc_key)==raw.end()){
+            std::fprintf(stderr,"[IBKRCRYPTO][CSM] no BTC daily series -> cannot gate, spot sleeve INERT\n");
+            return;
+        }
+        int last_i=-1;
+        auto close = CrossSectionalAllocator::align(raw, last_i);
+        if(last_i < alloc.regime_ma){
+            std::fprintf(stderr,"[IBKRCRYPTO][CSM] only %d aligned days (<%d) -> INERT\n",last_i+1,alloc.regime_ma);
+            return;
+        }
+        bool bull = alloc.is_bull(close, last_i);
+        auto w = alloc.target_weights(close, last_i);
+        std::printf("[IBKRCRYPTO][CSM] book=$%.0f bull=%d picks=%zu (universe=%zu daily coins)\n",
+                    book, bull, w.size(), close.size());
+        for(const auto& kv : w){
+            const SpotContract* sp = find_spot(kv.first);
+            if(!sp) continue;                            // not Paxos-tradeable -> skip
+            double usd = kv.second * book;
+            // mark = coin's last finite daily close (route_ sizes SELLs / cur_usd off it)
+            double mark=0.0; const auto& s=close.at(kv.first);
+            for(int j=last_i;j>=0;--j) if(s[j]==s[j]){ mark=s[j]; break; }
+            spot_tgt_usd_[sp->ib_symbol] += usd;
+            if(mark>0.0) tgt_px_[sp->ib_symbol] = mark;
+            std::printf("[IBKRCRYPTO][CSM]   %-5s w=%.3f -> $%.2f mark=%.2f\n",
+                        sp->ib_symbol, kv.second, usd, mark);
+        }
+        if(!bull) std::printf("[IBKRCRYPTO][CSM] BEAR regime (BTC<200DMA) -> all cash, no spot targets\n");
     }
 
     bool connect(const char* host,int port,int id){
