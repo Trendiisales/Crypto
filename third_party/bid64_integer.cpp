@@ -21,6 +21,7 @@
 typedef uint64_t Dec;
 static const uint64_t EXP_BIAS = 398;
 static const uint64_t COEF_MASK = (1ULL<<53)-1;   // 53-bit coefficient (< 2^53)
+static const Dec      UNSET_DEC = ~0ULL;          // UNSET_DECIMAL (ULLONG_MAX) sentinel
 
 // Encode an arbitrary finite double into decimal64 BID (small-coefficient form).
 static Dec enc(double d){
@@ -45,6 +46,7 @@ static Dec enc(double d){
 // Decode decimal64 BID -> double. Exact for the small-coef form; approximates the
 // rare large-coef ('11') form (which enc() never produces).
 static double dec(Dec x){
+    if(x==UNSET_DEC) return 0.0;   // sentinel: no numeric value
     uint64_t sign = x>>63;
     uint64_t top2 = (x>>61)&3;
     double coef; int exp;
@@ -63,7 +65,14 @@ extern "C" {
 Dec    __binary64_to_bid64(double d, unsigned, unsigned*){ return enc(d); }
 double __bid64_to_binary64(Dec x, unsigned, unsigned*){ return dec(x); }
 Dec    __bid64_from_string(char* s, unsigned, unsigned*){ return enc(s? std::strtod(s,nullptr):0.0); }
-void   __bid64_to_string(char* out, Dec x, unsigned*){ if(out) std::snprintf(out,32,"%.15g",dec(x)); }
+void   __bid64_to_string(char* out, Dec x, unsigned*){
+    // UNSET_DECIMAL must serialize EMPTY: a cashQty order leaves totalQuantity unset,
+    // and TWS reads an empty size field as "use cashQty". Emitting a number (or -inf)
+    // here is the err 320 '-inf' / 10289 blocker on MKT+cashQty spot orders.
+    if(!out) return;
+    if(x==UNSET_DEC){ out[0]='\0'; return; }
+    std::snprintf(out,32,"%.15g",dec(x));
+}
 Dec    __bid64_add(Dec a, Dec b, unsigned, unsigned*){ return enc(dec(a)+dec(b)); }
 Dec    __bid64_sub(Dec a, Dec b, unsigned, unsigned*){ return enc(dec(a)-dec(b)); }
 Dec    __bid64_mul(Dec a, Dec b, unsigned, unsigned*){ return enc(dec(a)*dec(b)); }

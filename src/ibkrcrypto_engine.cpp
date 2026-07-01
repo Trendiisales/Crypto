@@ -74,8 +74,8 @@ static Contract spot_contract(const SpotContract& sp){
 
 class IbkrCryptoEngine : public DefaultEWrapper {
 public:
-    IbkrCryptoEngine(bool live, bool flatten=false, bool probe=false)
-        : live_(live), flatten_(flatten), probe_(probe), risk_(account_usd()) {
+    IbkrCryptoEngine(bool live, bool flatten=false, bool probe=false, bool probe_spot=false)
+        : live_(live), flatten_(flatten), probe_(probe), probe_spot_(probe_spot), risk_(account_usd()) {
         risk_.new_day();
         cli_ = std::make_unique<EClientSocket>(this,&sig_);
         // build the validated roster
@@ -156,6 +156,16 @@ public:
 
     void nextValidId(OrderId id) override { nextId_=id;
         std::printf("[IBKRCRYPTO] connected, nextValidId=%ld clientId=88\n",(long)id);
+        if(probe_spot_){
+            // Verify the LIVE spot order FORM (now that the bid64 fix encodes cashQty):
+            // MKT + cashQty + IOC on PAXOS BTC, whatIf (preview only, never executes).
+            // A clean openOrder preview = the form IB accepts; err 10289 (needs cashQty)
+            // or a tif rejection surfaces via error(). reqId 5000.
+            Contract c; c.symbol="BTC"; c.secType="CRYPTO"; c.exchange="PAXOS"; c.currency="USD";
+            std::printf("[IBKRCRYPTO][PROBE-SPOT] reqContractDetails PAXOS BTC CRYPTO USD (reqId=5000)\n");
+            cli_->reqContractDetails(5000, c);
+            return;
+        }
         if(probe_){
             // Non-destructive eligibility probe: can this account resolve IBKR spot-crypto
             // (CSP/Paxos) contracts? reqContractDetails only -- NO orders. err 200 "no
@@ -212,7 +222,7 @@ public:
     // whatIf order preview result -- commission/margin if eligible; a permission error
     // instead arrives via error(). Only relevant to --probe-crypto.
     void openOrder(OrderId,const Contract& c,const Order&,const OrderState& st) override {
-        if(!probe_) return;
+        if(!probe_ && !probe_spot_) return;
         std::printf("[IBKRCRYPTO][PROBE] whatIf OK %s status=%s commission=%s %s initMargin=%s maintMargin=%s\n",
                     c.symbol.c_str(), st.status.c_str(),
                     st.commission==st.commission?std::to_string(st.commission).c_str():"n/a", st.commissionCurrency.c_str(),
@@ -255,6 +265,17 @@ public:
     // supply. The CSV is the exact validated series the backtest+shadow book use, so
     // warming from it is bar-for-bar faithful; IB is used only for execution.
     void contractDetails(int reqId,const ContractDetails& cd) override {
+        if(reqId>=5000 && reqId<6000){   // PROBE-SPOT: verify the live MKT+cashQty+IOC form
+            const Contract& c=cd.contract;
+            std::printf("[IBKRCRYPTO][PROBE-SPOT] RESOLVED %s %s %s conId=%ld localSym=%s\n",
+                        c.symbol.c_str(),c.secType.c_str(),c.exchange.c_str(),(long)c.conId,c.localSymbol.c_str());
+            double usd = std::strtod(crypto::env_or("IBKRCRYPTO_PROBE_SPOT_USD","100").c_str(),nullptr);
+            Order o; o.action="BUY"; o.orderType="MKT"; o.cashQty=usd; o.tif="IOC"; o.whatIf=true;
+            std::printf("[IBKRCRYPTO][PROBE-SPOT] whatIf BUY %s MKT cashQty=$%.2f IOC (conId=%ld)\n",
+                        c.symbol.c_str(),usd,(long)c.conId);
+            cli_->placeOrder(nextId_++, c, o);
+            return;
+        }
         if(reqId>=3000 && reqId<4000){   // PROBE: spot-crypto eligibility
             const Contract& c=cd.contract;
             std::printf("[IBKRCRYPTO][PROBE] RESOLVED %s %s %s conId=%ld localSym=%s\n",
@@ -528,7 +549,7 @@ private:
         st<<"]}";
     }
 
-    bool live_; bool flatten_; bool probe_=false; OrderId nextId_=0;
+    bool live_; bool flatten_; bool probe_=false; bool probe_spot_=false; OrderId nextId_=0;
     EReaderOSSignal sig_{2000};
     std::unique_ptr<EClientSocket> cli_; std::unique_ptr<EReader> rd_;
     std::vector<Slot> slots_; std::unordered_map<int,int> rid_to_slot_;
@@ -545,14 +566,15 @@ private:
 
 int main(int argc,char**argv){
     setvbuf(stdout,nullptr,_IONBF,0);
-    int port=4002; bool live=false; bool flatten=false; bool probe=false;
+    int port=4002; bool live=false; bool flatten=false; bool probe=false; bool probe_spot=false;
     for(int i=1;i<argc;++i){
         if(!strcmp(argv[i],"--live")) live=true;
         else if(!strcmp(argv[i],"--flatten")) flatten=true;
         else if(!strcmp(argv[i],"--probe-crypto")) probe=true;
+        else if(!strcmp(argv[i],"--probe-spot")) probe_spot=true;
         else port=atoi(argv[i]);
     }
-    IbkrCryptoEngine e(live,flatten,probe);
+    IbkrCryptoEngine e(live,flatten,probe,probe_spot);
     if(!e.connect("127.0.0.1",port,88)){ std::printf("connect failed\n"); return 1; }
     for(int i=0;i<2000;++i) e.pump();
     e.cli()->eDisconnect(); std::printf("[IBKRCRYPTO] session end\n"); return 0;
