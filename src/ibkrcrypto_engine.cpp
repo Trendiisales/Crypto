@@ -105,6 +105,22 @@ public:
                 std::printf("[IBKRCRYPTO][PROBE] reqContractDetails %s CRYPTO %s USD (reqId=%d)\n",co,v,rid);
                 cli_->reqContractDetails(rid++, c);
             }
+            // SQF FUT eligibility (QTF/QEF/...): the spot loop above only tests PAXOS
+            // spot-crypto. The live book trades CME SQF futures, which previously returned
+            // err 201 "closing-only". reqContractDetails (reqId=4000+slot) resolves the
+            // front conId; a whatIf MKT order in contractDetailsEnd is the decisive
+            // non-destructive permission test (err 201 -> still closing-only, openOrder
+            // "whatIf OK" -> can open). Dedup by ib_symbol so QTF/QEF probe once each.
+            {
+                std::set<std::string> seen;
+                for(size_t i=0;i<slots_.size();++i){
+                    const std::string& ibsym=slots_[i].sc->ib_symbol;
+                    if(!seen.insert(ibsym).second) continue;
+                    std::printf("[IBKRCRYPTO][PROBE] reqContractDetails SQF %s %s %s (reqId=%d)\n",
+                                ibsym.c_str(),slots_[i].sc->sec_type.c_str(),slots_[i].sc->exchange.c_str(),4000+(int)i);
+                    cli_->reqContractDetails(4000+(int)i, sqf_contract(*slots_[i].sc));
+                }
+            }
             return;
         }
         if(flatten_){
@@ -176,7 +192,7 @@ public:
     // supply. The CSV is the exact validated series the backtest+shadow book use, so
     // warming from it is bar-for-bar faithful; IB is used only for execution.
     void contractDetails(int reqId,const ContractDetails& cd) override {
-        if(reqId>=3000){   // PROBE: spot-crypto eligibility
+        if(reqId>=3000 && reqId<4000){   // PROBE: spot-crypto eligibility
             const Contract& c=cd.contract;
             std::printf("[IBKRCRYPTO][PROBE] RESOLVED %s %s %s conId=%ld localSym=%s\n",
                         c.symbol.c_str(),c.secType.c_str(),c.exchange.c_str(),(long)c.conId,c.localSymbol.c_str());
@@ -197,12 +213,31 @@ public:
             }
             return;
         }
+        if(reqId>=4000 && reqId<5000){   // PROBE: SQF FUT front-conId resolution (whatIf in End)
+            int s=reqId-4000; Slot& sl=slots_[s];
+            const std::string& exp=cd.contract.lastTradeDateOrContractMonth;
+            std::printf("[IBKRCRYPTO][PROBE] SQF RESOLVED %s conId=%ld localSym=%s exp=%s\n",
+                        cd.contract.symbol.c_str(),(long)cd.contract.conId,cd.contract.localSymbol.c_str(),exp.c_str());
+            if(!sl.has_con || exp<sl.front_expiry){ sl.resolved=cd.contract; sl.has_con=true; sl.front_expiry=exp; }
+            return;
+        }
         auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
         Slot& sl=slots_[it->second];
         const std::string& exp=cd.contract.lastTradeDateOrContractMonth;
         if(!sl.has_con || exp<sl.front_expiry){ sl.resolved=cd.contract; sl.has_con=true; sl.front_expiry=exp; }
     }
     void contractDetailsEnd(int reqId) override {
+        if(reqId>=4000 && reqId<5000){   // PROBE: fire the decisive whatIf on the resolved SQF front
+            int s=reqId-4000; Slot& sl=slots_[s];
+            if(!sl.has_con){ std::fprintf(stderr,"[IBKRCRYPTO][PROBE] SQF %s UNRESOLVED (no CME def)\n",sl.sc->ib_symbol.c_str()); return; }
+            Order o; o.action="BUY"; o.orderType="MKT";
+            o.totalQuantity=DecimalFunctions::doubleToDecimal(1.0);
+            o.tif="DAY"; o.whatIf=true;
+            std::printf("[IBKRCRYPTO][PROBE] whatIf BUY 1 SQF %s (conId=%ld localSym=%s)\n",
+                        sl.sc->ib_symbol.c_str(),(long)sl.resolved.conId,sl.resolved.localSymbol.c_str());
+            cli_->placeOrder(nextId_++, sl.resolved, o);
+            return;
+        }
         if(reqId>=3000){ std::printf("[IBKRCRYPTO][PROBE] end reqId=%d\n",reqId); return; }
         auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
         int s=it->second; Slot& sl=slots_[s];
