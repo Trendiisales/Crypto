@@ -23,6 +23,8 @@
 #include <set>
 #include <unordered_map>
 #include <fstream>
+#include <sstream>
+#include <cctype>
 #include "IbkrCryptoStrat.hpp"
 #include "CmeSqfContracts.hpp"
 #include "RiskManager.hpp"            // vendored from Omega/ibkr (catastrophe caps)
@@ -130,7 +132,11 @@ public:
     // #5 conId resolution: a bare (symbol=QTF,secType=FUT,exchange=CME) is ambiguous
     // -> err 321 "enter a local symbol or an expiry". reqContractDetails returns the
     // fully-qualified front contract(s); keep the FRONT (earliest expiry) per slot,
-    // then warm + route orders on the resolved conId.
+    // then route orders on the resolved conId. WARM is from the local daily CSV
+    // (see warm_from_csv_), NOT IB HMDS -- newly-listed 2025 SQF have no daily HMDS
+    // history (err 162 / empty), and EMAx needs 200 bars which those contracts cannot
+    // supply. The CSV is the exact validated series the backtest+shadow book use, so
+    // warming from it is bar-for-bar faithful; IB is used only for execution.
     void contractDetails(int reqId,const ContractDetails& cd) override {
         auto it=cd_rid_to_slot_.find(reqId); if(it==cd_rid_to_slot_.end()) return;
         Slot& sl=slots_[it->second];
@@ -142,19 +148,53 @@ public:
         int s=it->second; Slot& sl=slots_[s];
         if(!sl.has_con){ std::fprintf(stderr,"[IBKRCRYPTO] UNRESOLVED %s (%s) — no CME def, slot idle\n",
                                       sl.sym.c_str(),sl.sc->ib_symbol.c_str()); return; }
-        int rid=1000+s; rid_to_slot_[rid]=s;
         std::printf("[IBKRCRYPTO] resolved %s -> %s conId=%ld exp=%s\n",
                     sl.sym.c_str(),sl.resolved.localSymbol.c_str(),(long)sl.resolved.conId,sl.front_expiry.c_str());
-        cli_->reqHistoricalData(rid,sl.resolved,"","1 Y","1 day","TRADES",1,1,false,TagValueListSPtr());
+        // Warm from the local validated daily CSV (SQF HMDS has no usable history).
+        if(warm_from_csv_(sl)) decide_(s, sl.last_close);
+        else std::fprintf(stderr,"[IBKRCRYPTO] %s NOT WARM after CSV -> slot idle\n",sl.sym.c_str());
     }
 
 private:
     struct Slot { std::string sym; const SqfContract* sc; IbkrCryptoStrat strat; double last_close; int pos;
                   Contract resolved; bool has_con=false; std::string front_expiry; };
 
+    // Map a roster symbol ("btcusdt"/"ethusdt"/"solusdt"/"ndx") to its validated
+    // daily-OHLC CSV (the same series the backtest + shadow book use).
+    static std::string sym_daily_csv_(const std::string& sym){
+        if(sym=="ndx") return crypto::ndx_csv();
+        std::string u; for(char ch:sym) u+=(char)std::toupper((unsigned char)ch);
+        return crypto::csv_dir()+"/"+u+"_1d.csv";   // e.g. BTCUSDT_1d.csv
+    }
+
+    // Warm a slot's strat from its daily CSV. Format is time,open,high,low,close
+    // (crypto = header + ms ts; NDX = headerless + sec ts) -- both carry OHLC in
+    // cols 1-4, so a header line simply fails the numeric parse and is skipped.
+    bool warm_from_csv_(Slot& sl){
+        const std::string path=sym_daily_csv_(sl.sym);
+        std::ifstream f(path);
+        if(!f){ std::fprintf(stderr,"[IBKRCRYPTO] WARM-CSV missing %s (%s)\n",path.c_str(),sl.sym.c_str()); return false; }
+        std::string line; int rows=0;
+        while(std::getline(f,line)){
+            if(line.empty()) continue;
+            std::stringstream ss(line); std::string tok; double v[5]; int col=0; bool ok=true;
+            while(std::getline(ss,tok,',')){
+                if(col<5){ char* e=nullptr; v[col]=std::strtod(tok.c_str(),&e); if(e==tok.c_str()){ ok=false; break; } }
+                ++col;
+            }
+            if(!ok||col<5) continue;
+            sl.strat.on_daily_bar(ibkrcrypto::Bar{ v[1], v[2], v[3], v[4] });
+            sl.last_close=v[4]; ++rows;
+        }
+        std::printf("[IBKRCRYPTO] WARM-CSV %s <- %s rows=%d warm=%d last_close=%.2f\n",
+                    sl.sym.c_str(),path.c_str(),rows,(int)sl.strat.warm(),sl.last_close);
+        return sl.strat.warm();
+    }
+
     void resolve_and_subscribe_(){
         // Phase 1: resolve each SQF's front conId via reqContractDetails (see contractDetails*).
-        // reqHistoricalData/placeOrder are issued from contractDetailsEnd on the qualified contract.
+        // Warm (from local daily CSV) + placeOrder are issued from contractDetailsEnd on the
+        // qualified contract. SQF HMDS has no usable daily history -> CSV is the warm source.
         for(size_t i=0;i<slots_.size();++i){
             int cdr=2000+(int)i; cd_rid_to_slot_[cdr]=(int)i;
             cli_->reqContractDetails(cdr, sqf_contract(*slots_[i].sc));
