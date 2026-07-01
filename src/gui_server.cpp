@@ -51,7 +51,7 @@ static void resolve_paths() {
                        H + "/state.json"));
     COMP = env_or("COMPANION_STATE", home_dir() + "/stall-accountant/companion_state.json");
     STATE_INTRA = env_or("IBKRCRYPTO_STATE_INTRADAY", H + "/../backtest/data/ibkrcrypto_intraday/state.json");
-    COMP_INTRA  = env_or("COMPANION_STATE_INTRADAY", home_dir() + "/IBKRCrypto/companion_intraday/companion_state.json");
+    COMP_INTRA  = env_or("COMPANION_STATE_INTRADAY", home_dir() + "/Crypto/companion_intraday/companion_state.json");
     STATE_LUKE  = env_or("IBKRCRYPTO_STATE_LUKE",
         first_existing({H + "/state_luke.json", H + "/../backtest/data/ibkrcrypto_luke/state.json"},
                        H + "/state_luke.json"));
@@ -326,7 +326,7 @@ int main() {
     svr.Post("/api/flatten", [](const httplib::Request& req, httplib::Response& res) {
         std::string book = req.has_param("book") ? req.get_param_value("book") : "daily";
         std::string statePath, prod;
-        const std::string BT = "/Users/jo/IBKRCrypto/backtest";
+        const std::string BT = "/Users/jo/Crypto/backtest";
         if (book == "intraday") {
             statePath = STATE_INTRA;
             prod = "cd " + BT + " && /usr/bin/python3 refresh_shadow_intraday.py >/dev/null 2>&1";

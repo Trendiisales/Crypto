@@ -3,22 +3,36 @@ build/
 *.o
 *.dSYM/
 
-# runtime data (state, ledgers, fetched CSVs) — regenerated, not tracked
-data/ibkrcrypto/
-data/ibkrcrypto_intraday/
-data/ibkrcrypto_luke/
-data/funding/
-data/*.csv
-*.flag
-ALARM_STALE.txt
-
-# compiled binaries (built into build/, never committed at repo root)
+# compiled binaries (built into build/, never committed)
 /ibkrcrypto_bt
 /shadow_refresh
 /fetch
 /live_mark
 /gui_server
 /ibkrcrypto_engine
+backtest/ibkrcrypto_bt
+backtest/ibkrcrypto_bt.bak.*
+
+# --- runtime book state (regenerated every cron cycle) — NOT source ---
+backtest/data/ibkrcrypto/
+backtest/data/ibkrcrypto_intraday/
+backtest/data/ibkrcrypto_luke/
+# companion runtime state (rewritten every minute); ledgers (*_closed.csv) ARE tracked
+companion_intraday/companion_state.json
+companion_intraday/stall_acct_state.json
+companion_intraday/stall_track.json
+companion_intraday/companion_positions.json
+companion_intraday/companion_clipped.json
+companion_clip/companion_state.json
+companion_clip/stall_acct_state.json
+companion_clip/stall_track.json
+companion_clip/companion_positions.json
+companion_clip/companion_clipped.json
+gui/state.json
+
+# NOTE: historical price CSVs under backtest/data/ (*USDT_*.csv, *_funding.csv,
+# funding/*.csv, luke_universe/*.csv, eq*/*.csv) are TRACKED on purpose — they are
+# the validated research inputs, not regeneratable-on-demand runtime.
 
 # legacy companion runtime (legacy_companion/ holds preserved sources)
 legacy_companion/companion_positions.json
@@ -26,4 +40,14 @@ legacy_companion/companion_closed.csv
 legacy_companion/companion_state.json
 legacy_companion/stall_track.json
 legacy_companion/stall_acct_state.json
+
+# stale flags / alarms / logs / cruft
+*.flag
+ALARM_STALE.txt
+ALARM_STALE.txt.tmp
+PRODUCER_DISABLED
+KILL_FLAT
+*.log
 __pycache__/
+*.pyc
+.DS_Store

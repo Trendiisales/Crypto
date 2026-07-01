@@ -16,12 +16,13 @@ inline std::string env_or(const char* k, const std::string& d) {
     return (v && *v) ? std::string(v) : d;
 }
 
-// Live-layout defaults (the validated ~/IBKRCrypto/backtest tree).
-inline std::string csv_dir()  { return env_or("IBKRCRYPTO_CSVDIR",  "/Users/jo/IBKRCrypto/backtest/data"); }
+// Live-layout defaults (the validated ~/Crypto/backtest tree, consolidated from
+// ~/IBKRCrypto 2026-07-01). Env vars keep their IBKRCRYPTO_ names for cron compat.
+inline std::string csv_dir()  { return env_or("IBKRCRYPTO_CSVDIR",  "/Users/jo/Crypto/backtest/data"); }
 inline std::string ndx_csv()  { return env_or("IBKRCRYPTO_NDXCSV",  "/Users/jo/Tick/NDX_daily_2016_2026.csv"); }
-inline std::string fund_dir() { return env_or("IBKRCRYPTO_FUNDDIR", "/Users/jo/IBKRCrypto/backtest/data/funding"); }
-inline std::string bt_bin()   { return env_or("IBKRCRYPTO_BT",      "/Users/jo/IBKRCrypto/backtest/ibkrcrypto_bt"); }
-inline std::string data_dir() { return env_or("IBKRCRYPTO_DATADIR", "/Users/jo/IBKRCrypto/backtest/data/ibkrcrypto"); }
+inline std::string fund_dir() { return env_or("IBKRCRYPTO_FUNDDIR", "/Users/jo/Crypto/backtest/data/funding"); }
+inline std::string bt_bin()   { return env_or("IBKRCRYPTO_BT",      "/Users/jo/Crypto/backtest/ibkrcrypto_bt"); }
+inline std::string data_dir() { return env_or("IBKRCRYPTO_DATADIR", "/Users/jo/Crypto/backtest/data/ibkrcrypto"); }
 
 struct Leg {
     std::string key, sym, csvf;

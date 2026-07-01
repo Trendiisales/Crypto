@@ -1,0 +1,65 @@
+[IBKRCRYPTO-BT] XRP  1987 daily bars  px 0.24 -> 1.11  (SQF-on-spot, perp long+short, daily TFA)
+--- price strategies (carry=10%/yr modelled as daily TFA, shorts ON) ---
+XRP    TSMom20        2021_bull n=32   WR=37.5% PF= 1.36 net=  +91.86% maxDD=108.08%
+XRP    TSMom20        2022_bear n=30   WR=20.0% PF= 0.99 net=   -1.18% maxDD= 42.90%
+XRP    TSMom20        2023      n=38   WR=21.1% PF= 0.37 net= -114.64% maxDD=122.91%
+XRP    TSMom20        2024      n=38   WR=31.6% PF= 3.37 net= +248.74% maxDD= 76.81%
+XRP    TSMom20        2025      n=52   WR=34.6% PF= 0.56 net=  -77.62% maxDD= 87.55%
+XRP    TSMom20        2026ytd   n=21   WR=33.3% PF= 1.07 net=   +3.06% maxDD= 27.43%
+XRP    TSMom20        IS_21-23  n=101  WR=26.7% PF= 0.98 net=  -12.40% maxDD=176.29%
+XRP    TSMom20        OOS_24-26 n=111  WR=34.2% PF= 1.60 net= +188.52% maxDD= 92.35%
+XRP    TSMom20        FULL      n=212  WR=30.7% PF= 1.20 net= +177.30% maxDD=218.63%
+XRP    TSMom50        2021_bull n=17   WR=41.2% PF= 1.89 net=  +51.54% maxDD= 35.20%
+XRP    TSMom50        2022_bear n=26   WR=38.5% PF= 0.80 net=  -24.90% maxDD= 99.72%
+XRP    TSMom50        2023      n=26   WR=19.2% PF= 0.17 net= -116.14% maxDD=133.86%
+XRP    TSMom50        2024      n=17   WR=23.5% PF= 0.15 net=  -88.79% maxDD= 95.27%
+XRP    TSMom50        2025      n=19   WR=26.3% PF= 0.29 net=  -88.27% maxDD=103.77%
+XRP    TSMom50        2026ytd   n=13   WR=53.8% PF= 1.09 net=   +5.14% maxDD= 35.27%
+XRP    TSMom50        IS_21-23  n=69   WR=31.9% PF= 0.79 net=  -68.16% maxDD=218.78%
+XRP    TSMom50        OOS_24-26 n=49   WR=34.7% PF= 1.55 net= +141.90% maxDD=103.77%
+XRP    TSMom50        FULL      n=118  WR=33.1% PF= 1.13 net=  +73.40% maxDD=290.19%
+XRP    IBS            2021_bull n=73   WR=60.3% PF= 1.28 net=  +45.53% maxDD= 80.81%
+XRP    IBS            2022_bear n=87   WR=50.6% PF= 1.01 net=   +2.03% maxDD= 28.87%
+XRP    IBS            2023      n=57   WR=63.2% PF= 1.97 net=  +42.70% maxDD= 20.42%
+XRP    IBS            2024      n=54   WR=57.4% PF= 0.34 net=  -97.45% maxDD=111.00%
+XRP    IBS            2025      n=78   WR=56.4% PF= 2.10 net=  +78.52% maxDD= 17.51%
+XRP    IBS            2026ytd   n=27   WR=51.9% PF= 0.45 net=  -23.50% maxDD= 30.98%
+XRP    IBS            IS_21-23  n=218  WR=57.3% PF= 1.26 net=  +91.97% maxDD= 80.81%
+XRP    IBS            OOS_24-26 n=159  WR=56.0% PF= 0.84 net=  -42.43% maxDD=114.03%
+XRP    IBS            FULL      n=377  WR=56.8% PF= 1.08 net=  +49.53% maxDD=114.03%
+--- long-only (old spot-only) baseline for contrast ---
+XRP    TSMom20-LO     2021_bull n=16   WR=31.2% PF= 2.65 net= +175.51% maxDD= 54.72%
+XRP    TSMom20-LO     2022_bear n=15   WR=13.3% PF= 0.54 net=  -29.91% maxDD= 43.26%
+XRP    TSMom20-LO     2023      n=18   WR=33.3% PF= 0.63 net=  -18.06% maxDD= 28.90%
+XRP    TSMom20-LO     2024      n=19   WR=26.3% PF= 6.31 net= +267.09% maxDD= 41.16%
+XRP    TSMom20-LO     2025      n=26   WR=26.9% PF= 0.51 net=  -38.11% maxDD= 40.43%
+XRP    TSMom20-LO     2026ytd   n=10   WR=20.0% PF= 0.08 net=  -22.50% maxDD= 22.50%
+XRP    TSMom20-LO     IS_21-23  n=50   WR=26.0% PF= 1.57 net= +126.40% maxDD=105.03%
+XRP    TSMom20-LO     OOS_24-26 n=55   WR=25.5% PF= 2.35 net= +206.47% maxDD= 66.88%
+XRP    TSMom20-LO     FULL      n=105  WR=25.7% PF= 1.89 net= +332.87% maxDD=132.00%
+--- VOL-TARGET 2%/day sizing (hardening: cuts maxDD) ---
+XRP    TSMom50.vt     2021_bull n=17   WR=41.2% PF= 1.53 net=  +12.71% maxDD= 16.13%
+XRP    TSMom50.vt     2022_bear n=26   WR=38.5% PF= 0.74 net=  -18.58% maxDD= 56.15%
+XRP    TSMom50.vt     2023      n=26   WR=19.2% PF= 0.19 net=  -94.40% maxDD=109.95%
+XRP    TSMom50.vt     2024      n=17   WR=23.5% PF= 0.13 net=  -69.95% maxDD= 75.21%
+XRP    TSMom50.vt     2025      n=19   WR=26.3% PF= 0.30 net=  -50.07% maxDD= 59.06%
+XRP    TSMom50.vt     2026ytd   n=13   WR=53.8% PF= 0.72 net=  -15.38% maxDD= 30.90%
+XRP    TSMom50.vt     IS_21-23  n=69   WR=31.9% PF= 0.59 net=  -87.00% maxDD=160.80%
+XRP    TSMom50.vt     OOS_24-26 n=49   WR=34.7% PF= 1.60 net= +109.03% maxDD= 75.21%
+XRP    TSMom50.vt     FULL      n=118  WR=33.1% PF= 1.05 net=  +21.38% maxDD=215.85%
+XRP    IBS.vt         2021_bull n=73   WR=60.3% PF= 1.18 net=   +9.28% maxDD= 20.62%
+XRP    IBS.vt         2022_bear n=87   WR=50.6% PF= 0.94 net=   -4.51% maxDD= 28.11%
+XRP    IBS.vt         2023      n=57   WR=63.2% PF= 1.95 net=  +33.01% maxDD= 16.52%
+XRP    IBS.vt         2024      n=54   WR=57.4% PF= 0.54 net=  -28.72% maxDD= 34.47%
+XRP    IBS.vt         2025      n=78   WR=56.4% PF= 1.58 net=  +24.98% maxDD= 13.61%
+XRP    IBS.vt         2026ytd   n=27   WR=51.9% PF= 0.51 net=  -15.68% maxDD= 24.13%
+XRP    IBS.vt         IS_21-23  n=218  WR=57.3% PF= 1.23 net=  +39.03% maxDD= 29.86%
+XRP    IBS.vt         OOS_24-26 n=159  WR=56.0% PF= 0.86 net=  -19.41% maxDD= 35.88%
+XRP    IBS.vt         FULL      n=377  WR=56.8% PF= 1.06 net=  +19.62% maxDD= 35.88%
+--- FUNDING CARRY (perp-native, real funding overlay) ---
+XRP    Carry.03       2025      n=19   WR=57.9% PF= 1.27 net=   +9.32% maxDD= 24.80%
+XRP    Carry.03       2026ytd   n=12   WR=25.0% PF= 0.45 net=  -11.07% maxDD= 17.72%
+XRP    Carry.03       OOS_24-26 n=32   WR=43.8% PF= 0.94 net=   -3.68% maxDD= 24.80%
+XRP    Carry.03       FULL      n=32   WR=43.8% PF= 0.94 net=   -3.68% maxDD= 24.80%
+XRP    Carry.05       OOS_24-26 n=4    WR=25.0% PF= 0.21 net=   -4.22% maxDD=  5.00%
+XRP    Carry.05       FULL      n=4    WR=25.0% PF= 0.21 net=   -4.22% maxDD=  5.00%
