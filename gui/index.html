@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>IBKRCrypto — Crypto Book</title>
+<html><head><meta charset="utf-8"><title>IBKRCrypto — Tradeable Book (QNDX)</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Ctext%20y='25'%20x='16'%20font-size='26'%20text-anchor='middle'%20fill='%23e02424'%20font-family='Georgia,serif'%20font-weight='bold'%3E%CE%A9%3C/text%3E%3C/svg%3E">
 <style>
   body{background:#0b0e13;color:#cdd6e4;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0;padding:14px 18px}
@@ -7,17 +7,7 @@
   .mode{display:inline-block;padding:2px 8px;border-radius:4px;font-weight:700}
   .SHADOW{background:#243;color:#7fe}.LIVE{background:#522;color:#fbb}
   .live{display:inline-block;padding:2px 8px;border-radius:4px;background:#10243a;color:#6cf;font-size:11px}
-  /* nowrap+ellipsis so the long companion-bank reason string can't wrap to a 2nd line —
-     a wrapped left line was pushing the left table ~19px below the right (mis-aligned heads) */
-  .tot{margin:8px 0 6px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .tot b{font-size:15px} .tot span{margin-right:18px}
-  /* two books side-by-side; collapse to a single column only on a genuinely narrow viewport.
-     each book scrolls horizontally inside its own half so a wide table can't break the grid. */
-  .books{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
-  @media(max-width:1180px){.books{grid-template-columns:1fr}}
-  .book-sec{min-width:0;margin:0;overflow-x:auto}
-  /* each grid column stacks its books vertically, so Luke sits directly under Daily
-     in the left column instead of waiting on the tall Intraday row (no big gap). */
-  .bookcol{min-width:0;display:flex;flex-direction:column;gap:18px}
+  .book-sec{min-width:0;margin:0;overflow-x:auto;max-width:1100px}
   .prot{background:#101622;border:1px solid #1c2230;border-left:3px solid #3a7;border-radius:5px;padding:7px 11px;margin:0 0 10px;color:#9aa7ba;font-size:11px;line-height:1.45}
   .prot b{color:#cdd6e4}.prot i{color:#6cf;font-style:normal}
   .exit{color:#d9b25f}.usd{font-weight:700}
@@ -33,16 +23,15 @@
   tr.dim td{color:#5a6373}
   button{background:#1c2230;color:#cdd6e4;border:1px solid #2a3346;border-radius:5px;padding:3px 10px;cursor:pointer;font:inherit}
   button.on{background:#243;color:#7fe;border-color:#2c5}
-  .ven-ladder{color:#5fd97f}.ven-perp{color:#d9b25f}
-  /* STALENESS GUARD (S-2026-06-30): book rows mark live off the browser WS, so a dead
-     producer keeps the P&L ticking and LOOKS alive. This badge is the loud red truth. */
+  /* STALENESS GUARD: book marks live off the browser feed, so a dead producer keeps the
+     page LOOKING alive. This badge is the loud red truth. */
   .stale-badge{display:none;margin-left:8px;padding:2px 9px;border-radius:4px;background:#5a1010;color:#ffd2d2;
     font-weight:700;letter-spacing:.5px;border:1px solid #b33;animation:blink 1.1s steps(2,start) infinite}
   .stale-badge.on{display:inline-block}
   @keyframes blink{50%{background:#9b1c1c;color:#fff}}
   .stale-why{display:none;margin:2px 0 6px;color:#ff9a9a;font-size:11px;line-height:1.4}
   .stale-why.on{display:block}
-  .marks-stale{opacity:.45;filter:grayscale(.6)}  /* dim a book whose marks are frozen */
+  .marks-stale{opacity:.45;filter:grayscale(.6)}
   /* per-book KILL ALL (2-step confirm) — paper-flatten this book via the KILL_FLAT marker */
   .killbtn{margin-left:10px;background:#3a1414;color:#ffb4b4;border:1px solid #b33;padding:2px 9px}
   .killbtn.armed{background:#b31a1a;color:#fff;border-color:#f55;animation:blink 1.1s steps(2,start) infinite}
@@ -51,101 +40,35 @@
   .killed-badge.on{display:inline-block}
 </style></head>
 <body>
-  <h1>IBKRCrypto — Crypto Book
-      <span id="livep" class="live">live px: —</span>
-      <button id="snd" onclick="toggleSnd()">🔔 sound: off</button></h1>
-  <div class="sub">CME Spot-Quoted Futures via IBKR (clientId 88, shared gateway) · live px: crypto = Coinbase WS, NDX = IBKR NQ live (gateway 4001, 0.991 cash basis)</div>
+  <h1>IBKRCrypto — Tradeable Book
+      <span id="livep" class="live">NDX: —</span></h1>
+  <div class="sub">Only account-eligible instrument shown: <b>QNDX</b> (Nasdaq-100 SQF, secType FUT via IBKR clientId 88).
+    Crypto legs (spot Paxos + QTF/QEF perp) are hidden — account U23757894 is not crypto-eligible, so they are unexecutable.</div>
 
-  <div class="books">
-  <div class="bookcol"><!-- LEFT column: Daily + Luke stacked -->
-  <!-- ===================== DAILY BOOK ===================== -->
+  <!-- ===================== TRADEABLE BOOK (QNDX only) ===================== -->
   <div class="book-sec">
-    <h2 class="book-title">Daily Book <span id="mode" class="mode SHADOW">SHADOW</span> <span class="sub">updated <span id="ts">—</span></span><span id="stale" class="stale-badge">⚠ STALE</span><span id="killed" class="killed-badge">⛔ FLAT (kill)</span><button id="kill" class="killbtn" onclick="killBook('daily',this)">KILL ALL</button></h2>
+    <h2 class="book-title">QNDX <span id="mode" class="mode SHADOW">SHADOW</span> <span class="sub">updated <span id="ts">—</span></span><span id="stale" class="stale-badge">⚠ STALE</span><span id="killed" class="killed-badge">⛔ FLAT (kill)</span><button id="kill" class="killbtn" onclick="killBook('daily',this)">KILL ALL</button></h2>
     <div id="stale_why" class="stale-why"></div>
-    <div class="tot" id="tot"></div>
-    <div class="tot" id="compbank" title="companion (stall-clip) realized bank — paper, accounting-only, cross-book">companion bank: …</div>
     <div class="prot">Protection: <b>no hard profit-target / stop by design</b> (per-trade stops kill the trend edge — proven).
-      Risk held three ways → <b>vol-target sizing</b> (the <i>size</i> column), <b>exit-on-turn</b> (each leg flips/closes when its own signal reverses),
-      and <b>low-correlation engines</b> diversifying at the book level. <b>Corr-downsize</b> (<i>corr</i> column): a leg correlating &gt;0.5 with the REST of the book is <b>halved</b> (↓). Sizing, not a stop.</div>
-    <h2>All engines (live P&L) <span id="nopen" class="sub"></span></h2>
-    <table><thead><tr><th>symbol</th><th>strat</th><th>dir</th><th>size</th><th>entry px</th><th>live px</th><th>qty</th><th>corr</th><th>notional</th><th>exit / flip</th><th>live P&L ($)</th></tr></thead>
+      Risk held via <b>vol-target sizing</b> (the <i>size</i> column) and <b>exit-on-turn</b> (each leg flips/closes when its own signal reverses).</div>
+    <h2>Engines <span id="nopen" class="sub"></span></h2>
+    <table><thead><tr><th>symbol</th><th>strat</th><th>dir</th><th>size</th><th>entry px</th><th>live px</th><th>qty</th><th>notional</th><th>exit / flip</th></tr></thead>
      <tbody id="book"></tbody></table>
     <h2>Recent closed trades</h2>
-    <table><thead><tr><th>symbol</th><th>strat</th><th>dir</th><th>opened</th><th>closed</th><th>entry→exit</th><th>realized P&L</th></tr></thead>
+    <table><thead><tr><th>symbol</th><th>strat</th><th>dir</th><th>opened</th><th>closed</th><th>entry→exit</th></tr></thead>
      <tbody id="closed"></tbody></table>
   </div>
 
-  <!-- ===================== LUKE BOOK ===================== -->
-  <div class="book-sec">
-    <h2 class="book-title">Luke Book · daily momentum (multi-name) <span id="mode_l" class="mode SHADOW">SHADOW</span> <span class="sub">updated <span id="ts_l">—</span></span><span id="stale_l" class="stale-badge">⚠ STALE</span><span id="killed_l" class="killed-badge">⛔ FLAT (kill)</span><button id="kill_l" class="killbtn" onclick="killBook('luke',this)">KILL ALL</button></h2>
-    <div id="regime_l" class="stale-why"></div>
-    <div class="tot" id="tot_l"></div>
-    <div class="prot" style="border-left-color:#7fb37f">Luke tight-stop momentum (entry C inside-day/VCP + B AVWAP, <b>ride-wide exit</b> first close &lt;9EMA, no trimming).
-      <b>BTC&gt;200MA gate MANDATORY</b> — ungated CY2022 bear −$112k; gated sidesteps it. <b>Flat when BTC&lt;200MA = the gate working, not a fault.</b></div>
-    <h2>Open positions <span id="nopen_l" class="sub"></span></h2>
-    <table><thead><tr><th>ticker</th><th>setup</th><th>entry</th><th>stop</th><th>live px</th><th>unreal ($)</th></tr></thead>
-     <tbody id="book_l"></tbody></table>
-  </div>
-  </div><!-- /.bookcol LEFT -->
-
-  <div class="bookcol"><!-- RIGHT column: Intraday -->
-  <!-- ===================== INTRADAY BOOK ===================== -->
-  <div class="book-sec">
-    <h2 class="book-title">Intraday Book · 1h/4h trend <span id="mode_i" class="mode SHADOW">SHADOW</span> <span class="sub">updated <span id="ts_i">—</span></span><span id="stale_i" class="stale-badge">⚠ STALE</span><span id="killed_i" class="killed-badge">⛔ FLAT (kill)</span><button id="kill_i" class="killbtn" onclick="killBook('intraday',this)">KILL ALL</button></h2>
-    <div id="stale_why_i" class="stale-why"></div>
-    <div class="tot" id="tot_i"></div>
-    <div class="tot" id="compbank_i" title="intraday companion — 2% giveback exit + re-enter on continuation; paper, accounting-only">companion bank: …</div>
-    <div class="prot" style="border-left-color:#d9b25f">Same trend library at intraday cadence (TF-aware). <b>Cost wall: trend-only survives</b> (MR/high-turn die intraday).
-      Runs BOTH venues to measure the perp drag — <span class="ven-ladder">ladder</span> (BTC MBT 6 / ETH MET 8 / SOL-fut 2 bps) keeps the edge; <span class="ven-perp">perp/SQF</span> (BTC 22 / ETH 28 bps) drags most sub-1.
-      Companion = separate mirror with <b>2% absolute-giveback exit</b> + <b>re-enter on a new high</b> (rides wide otherwise).</div>
-    <h2>All engines (live P&L) <span id="nopen_i" class="sub"></span></h2>
-    <table><thead><tr><th>symbol / venue</th><th>strat</th><th>dir</th><th>size</th><th>entry px</th><th>live px</th><th>qty</th><th>corr</th><th>notional</th><th>exit / flip</th><th>live P&L ($)</th></tr></thead>
-     <tbody id="book_i"></tbody></table>
-    <h2>Recent closed trades</h2>
-    <table><thead><tr><th>symbol / venue</th><th>strat</th><th>dir</th><th>opened</th><th>closed</th><th>entry→exit</th><th>realized P&L</th></tr></thead>
-     <tbody id="closed_i"></tbody></table>
-  </div>
-  </div><!-- /.bookcol RIGHT -->
-  </div><!-- /.books -->
-
 <script>
-let last={},first=true,soundOn=false,actx=null,livepx={};
-let state=null,comp={},stateI=null,compI={},ndx={px:0,src:'',state:''};
-function toggleSnd(){ soundOn=!soundOn; if(soundOn&&!actx)actx=new(window.AudioContext||window.webkitAudioContext)();
-  if(actx&&actx.state==='suspended')actx.resume();
-  const b=document.getElementById('snd');b.textContent='🔔 sound: '+(soundOn?'on':'off');b.className=soundOn?'on':''; }
-function beep(){ if(!soundOn||!actx)return;const o=actx.createOscillator(),g=actx.createGain();
-  o.frequency.value=880;o.connect(g);g.connect(actx.destination);g.gain.value=0.08;o.start();o.stop(actx.currentTime+0.18); }
-function cls(v){ return v>1e-4?'pos':(v<-1e-4?'neg':'z'); }
-function pnl(v){ return `<span class="${cls(v)}">${v>0?'+':''}${v.toFixed(2)}%</span>`; }
-function usd(v){ const a=Math.abs(v); const d=a<100?2:(a<10000?1:0);
-  return `<span class="usd ${cls(v)}">${v>0?'+':''}$${v.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d})}</span>`; }
+let last={},first=true;
+let state=null,ndx={px:0,src:'',state:''};
+// only account-eligible instrument: QNDX (Nasdaq index SQF). Everything crypto is hidden.
+function isTradeable(sym){ return sym.indexOf('NDX')>=0||sym.indexOf('Nasdaq')>=0; }
 function dirCell(p){ return p>0?'<span class=LONG>LONG</span>':(p<0?'<span class=SHORT>SHORT</span>':'<span class=flat>flat</span>'); }
-function symCoin(s){ if(s.indexOf('BTC')>=0)return'BTC'; if(s.indexOf('ETH')>=0)return'ETH'; if(s.indexOf('SOL')>=0)return'SOL'; return null; }
-function venTag(sym){ const l=sym.toLowerCase();
-  if(l.indexOf('ladder')>=0||l.indexOf('mbt')>=0||l.indexOf('met')>=0||l.indexOf('fut')>=0) return ' <span class=ven-ladder>◆ladder</span>';
-  if(l.indexOf('perp')>=0||l.indexOf('sqf')>=0) return ' <span class=ven-perp>◇perp</span>';
-  return ''; }
-// live crypto prices via Coinbase WebSocket — pushes on EVERY trade (true real-time)
-const PROD={'BTC-USD':'BTC','ETH-USD':'ETH','SOL-USD':'SOL'};
-let ws=null, lastTick=0;
-function connectWS(){
-  try{ ws=new WebSocket('wss://ws-feed.exchange.coinbase.com'); }catch(e){ setTimeout(connectWS,3000); return; }
-  ws.onopen=()=>{ ws.send(JSON.stringify({type:'subscribe',product_ids:Object.keys(PROD),channels:['ticker']}));
-    document.getElementById('livep').textContent='live px: connecting…'; };
-  ws.onmessage=ev=>{ let m; try{m=JSON.parse(ev.data);}catch(e){return;}
-    if(m.type==='ticker'&&PROD[m.product_id]){ livepx[PROD[m.product_id]]=+m.price; lastTick=Date.now();
-      document.getElementById('livep').textContent=
-        'live px ●  BTC '+(livepx.BTC?livepx.BTC.toFixed(0):'—')+'  ETH '+(livepx.ETH?livepx.ETH.toFixed(2):'—')+'  SOL '+(livepx.SOL?livepx.SOL.toFixed(2):'—');
-      renderAll(); } };
-  ws.onclose=()=>{ document.getElementById('livep').textContent='live px: reconnecting…'; setTimeout(connectWS,3000); };
-  ws.onerror=()=>{ try{ws.close();}catch(e){} };
-}
-// renders one book's tables into the given element-id set. intra=true uses the venue tag column.
-function renderBook(s, comp, ids, intra){
+function renderBook(s, ids){
   if(!s)return;
   const m=document.getElementById(ids.mode); if(m){m.textContent=s.mode;m.className='mode '+s.mode;}
-  // ---- staleness guard: badge + dim a book whose marks are frozen (live P&L is a lie) ----
+  // ---- staleness guard: badge + dim a book whose marks are frozen ----
   const fr=s._fresh||{}, rs=fr.reasons||[], ag=fr.ages||{};
   const marksLie=rs.some(r=>/MARKS|PRODUCER/.test(r));
   const t=document.getElementById(ids.ts);
@@ -157,67 +80,31 @@ function renderBook(s, comp, ids, intra){
   if(sw){ if(fr.stale){ sw.innerHTML='🔴 '+rs.join('&nbsp; · &nbsp;'); sw.classList.add('on'); } else { sw.classList.remove('on'); sw.innerHTML=''; } }
   const sec=document.getElementById(ids.book)&&document.getElementById(ids.book).closest('.book-sec');
   if(sec)sec.classList.toggle('marks-stale',marksLie);
-  let openU=0, openUsd=0;
-  const rows=(s.slots||[]).map(x=>{
-    const coin=symCoin(x.sym);
-    const isNdx=x.sym.indexOf('NDX')>=0||x.sym.indexOf('Nasdaq')>=0;
-    const lp=(isNdx&&ndx.px)?ndx.px:((coin&&livepx[coin])?livepx[coin]:x.px);
+  const tradeable=(s.slots||[]).filter(x=>isTradeable(x.sym));
+  const rows=tradeable.map(x=>{
+    const lp=ndx.px||x.px;
     const mult=x.mult||0, qty=x.contracts||0;
-    let u=0,uUsd=0;
-    if(x.pos!=0 && x.entry_px>0){ u=x.pos*(lp-x.entry_px)/x.entry_px*(x.vt||1)*100;
-                                  uUsd=x.pos*(lp-x.entry_px)*mult*qty; }
-    openU+=u; openUsd+=uUsd;
     const fl=(!first&&last[x.key]!==undefined&&last[x.key]!==x.pos)?' flash':'';
     const dim=x.pos==0?' dim':'';
-    const pxd=v=>v&&v.toFixed? v.toFixed(coin=='SOL'?2:(coin?1:2)):v;
     const exCell = x.pos==0 ? '<span class=z>—</span>'
                  : (x.exit_px>0 ? `<span class=exit>${(+x.exit_px).toLocaleString()}</span>` : '<span class=z>on-turn</span>');
-    const pnlCell = x.pos==0 ? '<span class=z>—</span>' : `${usd(uUsd)} <span class=sub>${pnl(u)}</span>`;
-    const symCell = x.sym + (intra?venTag(x.sym):'');
-    const cmp = comp[x.strat+'|'+x.sym];
-    const compRow = cmp ? `<tr class=dim><td colspan=11 style="text-align:left;padding-left:24px;border-left:2px solid #2c5">`+
-           `<span class=z>↳ companion</span> · ${cmp.side} · MFE ${cmp.mfe_pct}% · stall ${cmp.stall} · ${usd(cmp.upnl)} · `+
-           `${cmp.eligible?'<span class=pos>gate ✓ ARMED (2% giveback trail)</span>':'<span class=z>pre-gate (rides wide)</span>'}</td></tr>` : '';
-    return `<tr class="${(fl+dim).trim()}"><td>${symCell}</td><td>${x.strat}</td><td>${dirCell(x.pos)}</td>`+
+    return `<tr class="${(fl+dim).trim()}"><td>${x.sym}</td><td>${x.strat}</td><td>${dirCell(x.pos)}</td>`+
            `<td>${x.pos!=0?(x.vt||1).toFixed(2)+'×':'—'}</td>`+
-           `<td>${x.pos!=0?x.entry_px:'—'}</td><td>${pxd(lp)}</td>`+
-           `<td>${x.pos!=0?(x.contracts||0).toLocaleString()+(x.downsized?'<span class=exit> ↓</span>':''):'—'}</td>`+
-           `<td>${x.pos!=0?'<span class="'+(x.downsized?'neg':(x.corr<0?'pos':'sub'))+'">'+((x.corr>=0?'+':'')+(x.corr||0).toFixed(2))+'</span>':'<span class=z>—</span>'}</td>`+
+           `<td>${x.pos!=0?x.entry_px:'—'}</td><td>${lp&&lp.toFixed?lp.toFixed(2):lp}</td>`+
+           `<td>${x.pos!=0?(x.contracts||0).toLocaleString():'—'}</td>`+
            `<td><span class=sub>$${(x.notional||0).toLocaleString()}</span></td>`+
-           `<td>${exCell}</td><td>${pnlCell}</td></tr>`+compRow;
+           `<td>${exCell}</td></tr>`;
   }).join('');
-  document.getElementById(ids.book).innerHTML=rows||'<tr><td colspan=11 class=sub>no engines</td></tr>';
-  const no=document.getElementById(ids.nopen); if(no)no.textContent=`(${s.n_open||0} open / ${(s.slots||[]).length} engines)`;
-  const real=s.realized_pct||0, realUsd=s.realized_usd||0, pool=s.pool_usd||0, dep=s.deployed_usd||0;
-  const mo=s.month;
-  document.getElementById(ids.tot).innerHTML=
-    (mo?`<span>June ($${(mo.pool_usd||10000).toLocaleString(undefined,{maximumFractionDigits:0})} pool): <b class=usd>${usd(mo.book_usd)}</b> <span class=sub>${pnl(mo.ret_pct)}</span> <span class=sub>real-engine replay, whole month</span></span>`:'')+
-    (mo&&mo.gross_usd!=null?`<span class=sub>gross ${usd(mo.gross_usd)} − slip ${usd(mo.slip_cost_usd)} − funding ${usd(mo.funding_cost_usd)} = net ${usd(mo.book_usd)} <span class=sub>(real-cost line; funding = SQF-basis proxy)</span></span>`:'')+
-    `<span>book total: <b>${usd(realUsd+openUsd)}</b> <span class=sub>${pnl(real+openU)}</span></span>`+
-    `<span>open unrealized: ${usd(openUsd)} <span class=sub>${pnl(openU)}</span></span>`+
-    `<span>realized: ${usd(realUsd)} <span class=sub>${pnl(real)}</span></span>`+
-    (pool?`<span class=sub>pool $${pool.toLocaleString()} · deployed $${dep.toLocaleString()} across ${s.n_open||0}</span>`:'');
-  document.getElementById(ids.closed).innerHTML=(s.closed||[]).map(c=>
-    `<tr><td>${c.sym+(intra?venTag(c.sym):'')}</td><td>${c.strat}</td><td>${dirCell(c.dir==='LONG'?1:-1)}</td>`+
-    `<td>${c.entry_ts||'—'}</td><td>${c.exit_ts||'—'}</td><td>${c.entry_px}→${c.exit_px}</td>`+
-    `<td>${'realized_usd' in c ? usd(c.realized_usd) : pnl(c.realized_pct||0)} <span class=sub>${pnl(c.realized_pct||0)}</span></td></tr>`
-  ).join('')||'<tr><td colspan=7 class=sub>none yet</td></tr>';
+  document.getElementById(ids.book).innerHTML=rows||'<tr><td colspan=9 class=sub>no engines</td></tr>';
+  const nOpen=tradeable.filter(x=>x.pos!=0).length;
+  const no=document.getElementById(ids.nopen); if(no)no.textContent=`(${nOpen} open / ${tradeable.length} engines)`;
+  document.getElementById(ids.closed).innerHTML=(s.closed||[]).filter(c=>isTradeable(c.sym)).map(c=>
+    `<tr><td>${c.sym}</td><td>${c.strat}</td><td>${dirCell(c.dir==='LONG'?1:-1)}</td>`+
+    `<td>${c.entry_ts||'—'}</td><td>${c.exit_ts||'—'}</td><td>${c.entry_px}→${c.exit_px}</td></tr>`
+  ).join('')||'<tr><td colspan=6 class=sub>none yet</td></tr>';
 }
 function renderAll(){
-  renderBook(state, comp, {mode:'mode',ts:'ts',book:'book',nopen:'nopen',tot:'tot',closed:'closed',stale:'stale',staleWhy:'stale_why',killed:'killed'}, false);
-  renderBook(stateI, compI, {mode:'mode_i',ts:'ts_i',book:'book_i',nopen:'nopen_i',tot:'tot_i',closed:'closed_i',stale:'stale_i',staleWhy:'stale_why_i',killed:'killed_i'}, true);
-}
-function compBank(c, elId){
-  // CRYPTO DESK = CRYPTO BOOK ONLY. The daily companion mirrors BOTH books, so use its
-  // per-book CRYPTO slice (by_book.CRYPTO); the intraday file is crypto-only already but
-  // also carries by_book.CRYPTO. Never show the Omega slice here.
-  const be0=document.getElementById(elId);
-  if(c.disabled){ if(be0) be0.innerHTML='companion: <b class=neg>⛔ RETIRED</b> <span class=sub>('+(c.status||'killed by backtest')+')</span>'; return; }
-  const cb=(c.by_book&&c.by_book.CRYPTO)?c.by_book.CRYPTO:{realized:c.realized_total,by_reason:c.by_reason};
-  const rt=+(cb.realized||0), br=cb.by_reason||{}, be=document.getElementById(elId);
-  const nopen=(c.open_detail||[]).filter(p=>(p.book||'')==='CRYPTO').length||c.open_companions||0;
-  if(be){ const parts=Object.keys(br).map(k=>k+' '+usd(+br[k]||0)).join(' · ');
-    be.innerHTML='companion bank: <b class='+(rt>0?'pos':(rt<0?'neg':'sub'))+'>'+usd(rt)+'</b>'+(parts?' <span class=sub>('+parts+' · open '+nopen+')</span>':''); }
+  renderBook(state, {mode:'mode',ts:'ts',book:'book',nopen:'nopen',closed:'closed',stale:'stale',staleWhy:'stale_why',killed:'killed'});
 }
 // per-book KILL ALL: 2-step confirm, then POST /api/flatten?book=X. Server writes the durable
 // KILL_FLAT marker + triggers the producer to book every open leg flat at last mark. Paper only.
@@ -230,62 +117,19 @@ async function killBook(book,btn){
     btn.textContent=r.ok?'KILLED ✓':'KILL FAILED'; }
   catch(e){ btn.textContent='KILL FAILED'; }
   setTimeout(()=>{btn.disabled=false;btn.textContent='KILL ALL';},3000);
-  pullState(); pullStateIntra(); pullLuke();
+  pullState();
 }
 async function pullState(){
   try{ state=await (await fetch('/api/state',{cache:'no-store'})).json();
-    let changed=false;
-    (state.slots||[]).forEach(x=>{ if(!first&&last[x.key]!==undefined&&last[x.key]!==x.pos)changed=true; last[x.key]=x.pos; });
-    if(changed){ beep(); document.title='● TRADE — IBKRCrypto'; setTimeout(()=>document.title='IBKRCrypto — Crypto Book',4000); }
+    (state.slots||[]).forEach(x=>{ last[x.key]=x.pos; });
     first=false; renderAll();
   }catch(e){ document.getElementById('ts').innerHTML='<span class=neg>state unreachable</span>'; }
 }
-async function pullStateIntra(){
-  try{ stateI=await (await fetch('/api/state_intraday',{cache:'no-store'})).json();
-    (stateI.slots||[]).forEach(x=>{ last[x.key]=x.pos; }); renderAll();
-  }catch(e){ document.getElementById('ts_i').innerHTML='<span class=neg>state unreachable</span>'; }
-}
-async function pullNdx(){ try{ ndx=await (await fetch('/api/ndx',{cache:'no-store'})).json(); renderAll(); }catch(e){} }
-async function pullComp(){ try{ const c=await (await fetch('/api/companion',{cache:'no-store'})).json();
-  comp={}; (c.open_detail||c.positions||[]).forEach(p=>{ if((p.book||'')==='CRYPTO') comp[p.eng+'|'+p.sym]=p; });
-  compBank(c,'compbank'); renderAll(); }catch(e){} }
-async function pullCompIntra(){ try{ const c=await (await fetch('/api/companion_intraday',{cache:'no-store'})).json();
-  compI={}; (c.open_detail||c.positions||[]).forEach(p=>{ if((p.book||'')==='CRYPTO') compI[p.eng+'|'+p.sym]=p; });
-  compBank(c,'compbank_i'); renderAll(); }catch(e){} }
-async function pullLuke(){
-  try{ const d=await (await fetch('/api/state_luke',{cache:'no-store'})).json(); renderLuke(d); }
-  catch(e){ const t=document.getElementById('ts_l'); if(t) t.innerHTML='<span class=neg>state unreachable</span>'; }
-}
-function renderLuke(d){
-  const last=d.last||'—', eq=+(d.equity||0), eq0=+(d.equity0||10000), n=+(d.n_open||0), pos=d.positions||[];
-  const sr=+(d.shadow_realized||0), sn=+(d.shadow_n||0), since=d.live_since||'—';
-  const ts=document.getElementById('ts_l'); if(ts) ts.textContent=last;
-  const tot=document.getElementById('tot_l');
-  const openU=pos.reduce((a,p)=>a+(+(p.unreal||0)),0);
-  const nav=eq0+sr+openU, gain=nav-eq0, ret=eq0?gain/eq0*100:0;
-  if(tot) tot.innerHTML='book ('+since+' start, $'+eq0.toLocaleString(undefined,{maximumFractionDigits:0})+' paper): '
-    +'NAV <b class=usd>$'+nav.toLocaleString(undefined,{maximumFractionDigits:0})+'</b>'
-    +' · P&amp;L '+usd(gain)+' '+pnl(ret)
-    +' <span class=sub>('+usd(sr)+' realized/'+sn+'c · '+usd(openU)+' open)</span>'
-    +' · open <b>'+n+'</b> · closed today '+(d.closed_today||0);
-  const rg=document.getElementById('regime_l');
-  if(rg){ if(n===0){ rg.style.display='block'; rg.innerHTML='FLAT — BTC&lt;200MA bear gate: book standing down (this is the −$112k-bleed protection working)'; }
-          else { rg.style.display='none'; } }
-  const kb=document.getElementById('killed_l'); if(kb)kb.classList.toggle('on',!!d.killed);
-  const nop=document.getElementById('nopen_l'); if(nop) nop.textContent=n?('('+n+' open)'):'';
-  const tb=document.getElementById('book_l'); if(!tb) return;
-  if(!pos.length){ tb.innerHTML='<tr><td colspan=6 class=sub>no open positions — gate down / no breakout</td></tr>'; return; }
-  tb.innerHTML=pos.map(p=>{ const u=+(p.unreal||0);
-    return '<tr><td><b>'+(p.ticker||'')+'</b></td><td>'+(p.setup||'')+'</td><td>'+(+p.entry).toFixed(4)+'</td>'
-      +'<td>'+(+p.stop).toFixed(4)+'</td><td>'+(+p.close).toFixed(4)+'</td>'
-      +'<td class='+(u>0?'pos':(u<0?'neg':'sub'))+'>'+usd(u)+'</td></tr>'; }).join('');
-}
-pullState(); pullStateIntra(); connectWS(); pullNdx(); pullComp(); pullCompIntra(); pullLuke();
+async function pullNdx(){ try{ ndx=await (await fetch('/api/ndx',{cache:'no-store'})).json();
+  const lp=document.getElementById('livep'); if(lp) lp.textContent='NDX: '+(ndx.px?ndx.px.toLocaleString(undefined,{maximumFractionDigits:2}):'—')+(ndx.stale?' (stale)':'');
+  renderAll(); }catch(e){} }
+pullState(); pullNdx();
 setInterval(pullState,3000);
-setInterval(pullStateIntra,3000);
 setInterval(pullNdx,2000);
-setInterval(pullComp,5000);
-setInterval(pullCompIntra,5000);
-setInterval(pullLuke,5000);
 </script>
 </body></html>
