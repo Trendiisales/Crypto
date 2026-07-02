@@ -34,6 +34,11 @@ gui/state.json
 # funding/*.csv, luke_universe/*.csv, eq*/*.csv) are TRACKED on purpose — they are
 # the validated research inputs, not regeneratable-on-demand runtime.
 
+# multiyr 15m validated dataset (48 syms, ~1.3G) — used by the cross-sectional
+# allocator backtest. Reproducible via backtest/fetch_crypto.py + validate_dataset.
+# NOT committed (size); MANIFEST.json documents the sha/span of the validated vintage.
+backtest/data/multiyr/*.csv
+
 # legacy companion runtime (legacy_companion/ holds preserved sources)
 legacy_companion/companion_positions.json
 legacy_companion/companion_closed.csv
