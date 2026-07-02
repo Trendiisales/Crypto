@@ -211,6 +211,8 @@ function compBank(c, elId){
   // CRYPTO DESK = CRYPTO BOOK ONLY. The daily companion mirrors BOTH books, so use its
   // per-book CRYPTO slice (by_book.CRYPTO); the intraday file is crypto-only already but
   // also carries by_book.CRYPTO. Never show the Omega slice here.
+  const be0=document.getElementById(elId);
+  if(c.disabled){ if(be0) be0.innerHTML='companion: <b class=neg>⛔ RETIRED</b> <span class=sub>('+(c.status||'killed by backtest')+')</span>'; return; }
   const cb=(c.by_book&&c.by_book.CRYPTO)?c.by_book.CRYPTO:{realized:c.realized_total,by_reason:c.by_reason};
   const rt=+(cb.realized||0), br=cb.by_reason||{}, be=document.getElementById(elId);
   const nopen=(c.open_detail||[]).filter(p=>(p.book||'')==='CRYPTO').length||c.open_companions||0;

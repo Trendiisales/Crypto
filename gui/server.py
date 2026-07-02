@@ -142,8 +142,16 @@ class H(http.server.SimpleHTTPRequestHandler):
             try: return self._json(open(STATE_LUKE,"rb").read())
             except Exception: return self._json({"book":"LukeCrypto","mode":"SHADOW","equity":0,"n_open":0,"positions":[],"closed_today":0,"last":"unreachable"})
         if self.path.startswith("/api/companion_intraday"):   # MUST precede /api/companion
-            try: return self._json(open(COMP_INTRA,"rb").read())
-            except Exception: return self._json({"open_companions":0,"open_detail":[],"realized_total":0})
+            # RETIRED S-2026-07-02: intraday giveback companion parked on a REAL WF/regime
+            # fail (WF-H2 -82%, bear -185%, 1h book -328%); its cron is disabled so the
+            # bank is FROZEN, not live. Badge freshness + a hard disabled marker so the GUI
+            # renders it retired instead of presenting a stale $-bank as a live book.
+            try: d=json.loads(open(COMP_INTRA,"rb").read())
+            except Exception: d={"open_companions":0,"open_detail":[],"realized_total":0}
+            d["disabled"]=True
+            d["status"]="RETIRED — intraday companion killed by backtest (WF-H2 -82%); bank frozen, not live"
+            d["_fresh"]=_freshness(d,COMP_INTRA,"intraday")
+            return self._json(d)
         if self.path.startswith("/api/state"):
             try: body=_inject_fresh(open(STATE,"rb").read(),STATE,"daily")
             except Exception: body=b'{"engine":"IBKRCrypto","mode":"SHADOW","slots":[],"day_pnl":0,"_fresh":{"stale":true,"reasons":["state unreachable"]}}'
