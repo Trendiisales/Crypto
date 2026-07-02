@@ -539,7 +539,16 @@ private:
         // REJECTS DAY tif -> must be IOC). spot_tgt_usd_ holds LONG-ONLY USD targets;
         // a held spot leg with no target is closed to flat. NEVER sells more coin
         // than held (long-only invariant, mirrors [[BearSpotNoEdge]] gate upstream).
-        constexpr double MIN_USD = 5.0;   // dust threshold; skip sub-$5 rebalances
+        constexpr double MIN_USD = 5.0;   // dust threshold; "no target" test + sub-$5 skip
+        // Cost-aware min ORDER notional. Paxos spot commission = 0.18%%/side with a HARD
+        // $1.75 min per order (probed 2026-07-02). A rebalance smaller than
+        // $1.75/0.005 = $350 pays >50bps -- past the cost band the trend edge was
+        // validated to ([[PaxosTrendBasket]] survives to 50bps). So never nibble a
+        // rebalance below this notional; full entries (~15%% book ~$438) clear it,
+        // exits use the full-close path below (exit-risk priority, not cost-gated).
+        constexpr double PAXOS_MIN_COMMISSION_USD = 1.75;
+        constexpr double SPOT_MAX_COST_FRAC       = 0.005;   // 50bps validated band
+        constexpr double MIN_ORDER_USD = PAXOS_MIN_COMMISSION_USD / SPOT_MAX_COST_FRAC;  // $350
         std::set<std::string> spot_syms;
         for(auto& kv:spot_tgt_usd_) spot_syms.insert(kv.first);
         for(auto& kv:cur_pos_)      // held-but-untargeted spot legs -> close to flat
@@ -575,6 +584,12 @@ private:
             std::printf("[IBKRCRYPTO][%s] %-4s(spot) tgt_usd=%.2f cur_usd=%.2f delta_usd=%+.2f mark=%.2f\n",
                         live_?"LIVE":"SHADOW",sym.c_str(),tgt_usd,cur_usd,delta_usd,mark);
             if(std::fabs(delta_usd)<MIN_USD) continue;
+            if(std::fabs(delta_usd)<MIN_ORDER_USD){   // cost-aware: $1.75 Paxos min > 50bps here
+                std::printf("[IBKRCRYPTO][%s] %-4s(spot) SKIP rebalance $%.2f < $%.0f min "
+                            "(Paxos $1.75 min-comm would exceed 50bps)\n",
+                            live_?"LIVE":"SHADOW",sym.c_str(),std::fabs(delta_usd),MIN_ORDER_USD);
+                continue;
+            }
             if(delta_usd>0){   // BUY more: cashQty notional
                 Order o; o.action="BUY"; o.orderType="MKT"; o.cashQty=delta_usd; o.tif="IOC";
                 if(live_){ cli_->placeOrder(nextId_++,c,o);
