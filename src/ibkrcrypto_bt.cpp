@@ -256,6 +256,17 @@ struct Roc : Strat<Roc>{ int N; double thr; Roc(int n,double t):N(n),thr(t){}
     int sig(const Series& s,int i)const{ if(i<N)return 0; double r=(s.c[i]-s.c[i-N])/s.c[i-N];
         if(r>thr)return 1; if(r<-thr)return -1; return 0;} };
 
+// Wide up-jump momentum (crypto): LONG on a W-bar up-jump >= thr, ride until the
+// symmetric W-bar DOWN-jump (<= -thr). Long-only. Stateless persistence: the most
+// recent bar whose |W-bar jump| >= thr decides direction (mirrors the parent
+// ride-to-symmetric-flip; DonchHold-style stateless hold). W=24 (24x1h) per parent.
+struct UpJump : Strat<UpJump>{ double thr; int W; UpJump(double t,int w=24):thr(t),W(w){}
+    int sig(const Series& s,int i)const{ if(i<W)return 0;
+        for(int k=i;k>=W;--k){ double j=s.c[k]/s.c[k-W]-1.0;
+            if(j>= thr) return 1;      // most recent event = up-jump -> long
+            if(j<=-thr) return 0; }    // most recent event = down-jump -> flat
+        return 0;} };
+
 // Regime-switch: efficiency-ratio gate. trending -> TSMom; chop -> IBS; mid -> flat.
 struct Regime : Strat<Regime>{ int N; double erhi,erlo; Regime(int n,double a,double b):N(n),erhi(a),erlo(b){}
     int sig(const Series& s,int i)const{ if(i<N+1)return 0;
@@ -419,6 +430,7 @@ int main(int argc,char**argv){
             if(st=="TSMom50") run_dollars(w,s,d,TSMom(50),mult,fee,a,b);
             else if(st=="IBS") run_dollars(w,s,d,IBS(0.15,0.85),mult,fee,a,b);
             else if(st=="Donch40") run_dollars(w,s,d,DonchHold(40),mult,fee,a,b);
+            else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; run_dollars(w,s,d,UpJump(thr),mult,fee,a,b); }
         };
         go("LAST_6M",S6,T1); go("FULL_17-26",F0,T1);
         return 0;
@@ -461,6 +473,7 @@ int main(int argc,char**argv){
         else if(st=="Roc"){ Roc S(20,0.0); t=S.signal(s,N-1); ex=flip(S,t); }
         else if(st=="TSMom20"){ TSMom S(20); t=S.signal(s,N-1); ex=flip(S,t); }
         else if(st=="Donch20"){ DonchHold S(20); t=S.signal(s,N-1); ex=flip(S,t); }
+        else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; UpJump S(thr); t=S.signal(s,N-1); ex=flip(S,t); }
         // REGIME GATE (S-2026-06-30): honour REGIME_MA in the live --signal path. run_bt
         // already gates; --signal previously did NOT -> the live shadow legs ran ungated.
         // Per-symbol close>SMA(regime_ma): long only above the MA, short only below. 0=off.
@@ -491,6 +504,7 @@ int main(int argc,char**argv){
         else if(st=="Roc") dump_equity(s,e,Roc(20,0.0),T0,T1);
         else if(st=="RSIrev") dump_equity(s,e,RSIrev(14,30,70),T0,T1);
         else if(st=="Regime") dump_equity(s,e,Regime(20,0.40,0.25),T0,T1);
+        else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; dump_equity(s,e,UpJump(thr),T0,T1); }
         return 0;
     }
     // --postrace STRAT [FROM_MS TO_MS] : per-bar `ts,pos,cumret` (whole-month book reconstruction)
@@ -511,6 +525,7 @@ int main(int argc,char**argv){
         else if(st=="Roc") dump_postrace(s,e,Roc(20,0.0),T0,T1);
         else if(st=="RSIrev") dump_postrace(s,e,RSIrev(14,30,70),T0,T1);
         else if(st=="Regime") dump_postrace(s,e,Regime(20,0.40,0.25),T0,T1);
+        else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; dump_postrace(s,e,UpJump(thr),T0,T1); }
         return 0;
     }
     std::printf("--- price strategies (carry=%.0f%%/yr modelled as daily TFA, shorts ON) ---\n",100*cfg.annual_carry);
@@ -543,6 +558,9 @@ int main(int argc,char**argv){
     row("Macd.vt",    s,vt, Macd(12,26));
     row("Roc20.vt",   s,vt, Roc(20,0.0));
     row("Regime.vt",  s,vt, Regime(20,0.40,0.25));
+    row("UpJump5.vt", s,vt, UpJump(0.05));
+    row("UpJump8.vt", s,vt, UpJump(0.08));
+    row("UpJump12.vt",s,vt, UpJump(0.12));
 
     // funding carry (perp-native) -- only meaningful where real funding exists
     if(fund){
