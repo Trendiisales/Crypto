@@ -126,7 +126,15 @@ static json fetch_klines_paginated(const std::string& sym, const std::string& in
 }
 
 static int run_intraday() {
-    const std::vector<std::string> PAIRS{"BTCUSDT", "ETHUSDT", "SOLUSDT"};
+    // Full intraday roster — MUST cover every symbol refresh_shadow_intraday.py +
+    // the upjump_* companion cron rungs consume. History: the python->C++ fetch
+    // migration silently narrowed this to the 3 majors, dropping the 7 alts below
+    // (AAVE/ADA/BNB/DOGE/NEAR/OP/TRX). Their 1h CSVs froze ~13h while every
+    // upjump_<alt> companion ran on stale bars; staleness_alarm.py caught it but
+    // the fetcher had no symbol-parity check. Keep this list == the consumer roster.
+    const std::vector<std::string> PAIRS{"BTCUSDT", "ETHUSDT", "SOLUSDT",
+                                         "AAVEUSDT", "ADAUSDT", "BNBUSDT", "DOGEUSDT",
+                                         "NEARUSDT", "OPUSDT", "TRXUSDT"};
     const std::vector<std::string> TFS{"1h", "4h"};
     const long long START_MS = 1609459200000LL;  // 2021-01-01 UTC
     for (auto& sym : PAIRS) {

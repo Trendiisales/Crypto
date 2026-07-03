@@ -86,7 +86,7 @@ def check(name, cfg):
         except Exception: pass
         try:
             subprocess.run(["osascript", "-e",
-                f'display notification "{summary[:200]}" with title "\U0001F534 IBKRCrypto STALE ({name})" sound name "Basso"'],
+                f'display notification "{summary[:200]}" with title "\U0001F534 CRYPTO (Binance) STALE ({name})" sound name "Basso"'],
                 timeout=10)
         except Exception: pass
         log("ALARM: " + summary); print("ALARM: " + summary)
