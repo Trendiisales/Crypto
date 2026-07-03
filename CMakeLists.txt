@@ -39,6 +39,9 @@ crypto_exe(ibkrcrypto_bt    src/ibkrcrypto_bt.cpp)
 # Shadow driver — needs nlohmann/json (header-only, vendored) + threads.
 crypto_exe(shadow_refresh   src/shadow_refresh.cpp   Threads::Threads)
 
+# Intraday shadow driver — 1h/4h trend stack (C++ port of refresh_shadow_intraday.py).
+crypto_exe(shadow_refresh_intraday src/shadow_refresh_intraday.cpp Threads::Threads)
+
 # Data fetch — needs libcurl + json.
 crypto_exe(fetch            src/fetch.cpp            CURL::libcurl)
 

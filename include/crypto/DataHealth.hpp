@@ -48,7 +48,11 @@ inline std::vector<std::string> integrity_check(const std::string& path) {
         }
         if (have_prev && prev_c > 0) {
             double jump = std::fabs(r.c - prev_c) / prev_c;
-            if (jump > 0.5) errs.push_back("row" + std::to_string(i) + " x-glitch jump (poss x1000)");
+            // Threshold 3.0 (300%) mirrors integrity_gate.py: a x1000/x100/x10 glitch is
+            // 900%..99900% single-bar, so 300% nails every order-of-magnitude corruption
+            // WITHOUT false-rejecting genuine crypto 1h pumps (e.g. DOGE +70% Jan-2021 mania,
+            // the exact wide up-jumps UpJump trades). Was 0.5 -> wrongly rejected DOGE 1h.
+            if (jump > 3.0) errs.push_back("row" + std::to_string(i) + " x-glitch jump (poss x1000)");
         }
         prev_ts = r.ts; prev_c = r.c; have_prev = true;
         if (errs.size() > 8) break;
