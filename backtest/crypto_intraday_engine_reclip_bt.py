@@ -31,12 +31,18 @@ KELT_N, KELT_M = 20, 2.0
 EMA_F, EMA_S = 20, 50
 DONCH_N = 40
 SMA_REG = 200
-ALLOW_SHORT = True
+import os
+# Operator mandate S-2026-07-04: crypto = Binance SPOT, LONG-ONLY, no perp / no IBKR.
+# Default long-only; ALLOW_SHORT=1 only for legacy A/B research, never for the live roster.
+ALLOW_SHORT = os.environ.get("ALLOW_SHORT", "0") == "1"
 
-# RT cost fraction per venue (bps+slip)/1e4 -- same as crypto_companion_intraday_bt.py
+# RT cost fraction per venue (bps+slip)/1e4 -- same as crypto_companion_intraday_bt.py.
+#   ladder/perp = the retired IBKR CME-micro / SQF-perp venues (drift, kept for A/B only).
+#   spot        = Binance SPOT round-trip: taker 0.10%/side => 20bps RT + slip. THE live venue.
 COST = {
     "ladder": {"BTC": (6+3)*1e-4,  "ETH": (8+3)*1e-4,  "SOL": (2+5)*1e-4},
     "perp":   {"BTC": (22+3)*1e-4, "ETH": (28+3)*1e-4, "SOL": (22+5)*1e-4},
+    "spot":   {"BTC": (20+3)*1e-4, "ETH": (20+3)*1e-4, "SOL": (20+5)*1e-4},
 }
 
 # per-engine arm gate (excursion-scaled so the gate is NOT inert -- measured from
