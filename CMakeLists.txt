@@ -51,24 +51,9 @@ crypto_exe(live_mark        src/live_mark.cpp        CURL::libcurl)
 # GUI server — cpp-httplib (vendored) needs threads.
 crypto_exe(gui_server       src/gui_server.cpp       Threads::Threads)
 
-# Live IBKR engine. Always built as a testable STUB (the #else path: signal core only,
-# prints a build hint). The REAL live engine (TWS connect, clientId 88, SQF orders) compiles
-# only with -DCRYPTO_WITH_IBKR=ON -DTWSAPI=<.../source/cppclient/client> on a box with the
-# TWS API. SHADOW by default at runtime (no orders unless --live).
-option(CRYPTO_WITH_IBKR "Build the REAL live IBKR engine against the TWS API" OFF)
-if(EXISTS ${CMAKE_SOURCE_DIR}/src/ibkrcrypto_engine.cpp)
-  add_executable(ibkrcrypto_engine src/ibkrcrypto_engine.cpp)
-  target_include_directories(ibkrcrypto_engine PRIVATE ${CRYPTO_INCLUDES})
-  target_link_libraries(ibkrcrypto_engine PRIVATE Threads::Threads)
-  if(CRYPTO_WITH_IBKR)
-    if(NOT DEFINED TWSAPI OR NOT EXISTS ${TWSAPI})
-      message(FATAL_ERROR "CRYPTO_WITH_IBKR=ON requires -DTWSAPI=<path to TWS API source/cppclient/client>")
-    endif()
-    target_compile_definitions(ibkrcrypto_engine PRIVATE OMEGA_WITH_IBKR)
-    target_include_directories(ibkrcrypto_engine PRIVATE ${TWSAPI})
-    file(GLOB TWS_SRC ${TWSAPI}/*.cpp)
-    # TWS DecimalFunctions needs Intel bid64 symbols; order sizes are integers, so
-    # link the integer-exact BID64 shim instead of the full Intel RDFP lib (fleet pattern).
-    target_sources(ibkrcrypto_engine PRIVATE ${TWS_SRC} ${CMAKE_SOURCE_DIR}/third_party/bid64_integer.cpp)
-  endif()
-endif()
+# Crypto execution venue = Binance spot (long-only), NOT IBKR. The old CME-SQF /
+# IBKR live engine (ibkrcrypto_engine + CmeSqfExecutor/Contracts + IbkrCryptoFeed +
+# bid64 TWS shim) was wrong-track drift — the AU account is crypto-ineligible and the
+# operator mandate is Binance-only. Removed S-2026-07-04. The live executor is
+# ChimeraCrypto's Binance SpotExecutor (josgp1), not this repo. Shadow/backtest here
+# runs pure-stdlib against Binance data (ibkrcrypto_bt / shadow_refresh).
