@@ -36,24 +36,13 @@ static std::string fmt(double v, int prec) {
     char buf[64]; std::snprintf(buf, sizeof(buf), "%.*f", prec, v); return std::string(buf);
 }
 
-// ── LIVE NDX MARK from our IBKR feed (SSH omega-vps -> aurora_NQ.json). Reject >30min
-// stale. Fallback: daily-close. Mirrors _read_live_nq. Returns NQ price or NaN.
-static double read_live_nq() {
-    if (std::getenv("CRYPTO_SKIP_LIVE_NDX")) return std::nan("");
-    std::string cmd =
-        "ssh -o ConnectTimeout=6 -o BatchMode=yes omega-vps "
-        "'powershell -NoProfile -Command \"$j=Get-Content C:\\Omega\\logs\\aurora\\aurora_NQ.json -Raw|ConvertFrom-Json; \\\"$($j.price) $($j.stamp_ms)\\\"\"' 2>/dev/null";
-    std::string out = run_capture(cmd);
-    std::stringstream ss(out);
-    double nq = 0; ss >> nq;
-    double stamp = 0; ss >> stamp;
-    if (nq > 0) {
-        double now = (double)std::time(nullptr);
-        if (stamp == 0 || (now - stamp / 1000.0) < 1800) return nq;
-        std::fprintf(stderr, "[live-mark] aurora NQ stale (>30min) -> daily-close fallback\n");
-    }
-    return std::nan("");
-}
+// ── NDX MARK: daily-close only. The old live NDX mark did an `ssh omega-vps ->
+// aurora_NQ.json` (IBKR NQ feed) EVERY refresh -- a ~4s VPS round-trip that made the
+// crypto refresh slow, and an IBKR runtime dependency the Binance-only mandate forbids
+// (operator S-2026-07-04: "no ibkr crypto -- we use Binance"). Removed: NDX now marks
+// from its own daily-close CSV (the daily-anchored fallback below), no ssh, no IBKR.
+// Returns NaN so `have_live_ndx` stays false and the daily-close mark is used.
+static double read_live_nq() { return std::nan(""); }
 
 int main() {
     const std::string DATADIR = data_dir();
