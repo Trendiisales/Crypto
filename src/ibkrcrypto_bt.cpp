@@ -99,7 +99,7 @@ struct Cfg {
     double half_spread_bps = 1.0;   // crossed each side
     double annual_carry  = 0.10;    // fallback daily TFA = this/365 (long pays in contango)
     bool   use_real_fund = false;   // use overlaid funding instead of annual_carry
-    bool   allow_short   = true;    // PERP UNLOCK
+    bool   allow_short   = false;   // LONG-ONLY: spot venue, WE CANNOT TRADE PERP (operator 2026-07-04). Down-cross => flat, never short. Was true ("PERP UNLOCK").
     // vol-target sizing (0 = off): size = clamp(vt_target / realized_daily_vol, vt_min, vt_max)
     double vt_target     = 0.0;     // e.g. 0.02 = target ~2%/day notional vol
     int    vt_lb         = 20;      // realized-vol lookback (days)
@@ -405,10 +405,10 @@ int main(int argc,char**argv){
     const char* fund = (argc>3 && argv[3][0]!='-') ? argv[3] : nullptr;
     if(const char* fc=getenv("FUNDCSV")) if(fc[0]) fund=fc;   // funding overlay via env (postrace can't pass argv[3])
     overlay_funding(s,fund);
-    std::printf("[IBKRCRYPTO-BT] %s  %d bars (tf=%lldms, %.2f/day)  px %.2f -> %.2f  (SQF-on-spot, perp long+short)\n",
+    std::printf("[IBKRCRYPTO-BT] %s  %d bars (tf=%lldms, %.2f/day)  px %.2f -> %.2f  (spot, LONG-ONLY -- no perp)\n",
         sym.c_str(), s.n(), (long long)G_TF_MS, G_BARS_PER_DAY, s.c.front(), s.c.back());
 
-    Cfg cfg;  // baseline: 6bps RT + 1bp half-spread x2, 10%/yr carry, shorts ON
+    Cfg cfg;  // baseline: 6bps RT + 1bp half-spread x2, 10%/yr carry, LONG-ONLY (shorts OFF; spot venue, no perp)
     if(const char* cb=getenv("COSTBPS")) cfg.cost_bps=atof(cb);
     if(const char* hs=getenv("HSPREAD")) cfg.half_spread_bps=atof(hs);
     if(const char* sb=getenv("SLIPBPS")) cfg.slip_bps=atof(sb);
@@ -483,6 +483,11 @@ int main(int argc,char**argv){
             else if(t<0 && s.c[N-1]>sma) t=0;
             if(t==0) ex=0.0;
         }
+        // LONG-ONLY shadow book (operator hard rule 2026-07-04): the live execution
+        // venue is spot-only -- WE CANNOT TRADE PERP. Never emit a short target on the
+        // live --signal path, regardless of the strat's allow_short/"PERP UNLOCK" default.
+        // A down-cross => flat (0), not short. Applies to every shadow leg (daily+intraday).
+        if(t<0){ t=0; ex=0.0; }
         std::printf("%s %s target=%d size=%.2f px=%.2f exit=%.2f\n",
             s.sym.c_str(), st.c_str(), t, vtsz(N-1), s.c[N-1], ex);
         return 0;
@@ -528,7 +533,7 @@ int main(int argc,char**argv){
         else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; dump_postrace(s,e,UpJump(thr),T0,T1); }
         return 0;
     }
-    std::printf("--- price strategies (carry=%.0f%%/yr modelled as daily TFA, shorts ON) ---\n",100*cfg.annual_carry);
+    std::printf("--- price strategies (carry=%.0f%%/yr modelled as daily TFA, LONG-ONLY / shorts OFF) ---\n",100*cfg.annual_carry);
     row("TSMom20", s,cfg, TSMom(20));
     row("TSMom50", s,cfg, TSMom(50));
     row("Donch20", s,cfg, DonchHold(20));
