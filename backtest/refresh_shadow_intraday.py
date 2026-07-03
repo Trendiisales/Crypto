@@ -57,6 +57,22 @@ ROSTER=[
  # SOL-1h Donch40 = best-sampled new edge ([[DonchianPerpBreakout]]): ladder 4.66 / perp 4.35,
  # DD 26%, OOS 3.06 (841 bars). Ladder-only for now (SOL perp = QSOL pending on IB acct).
  ("sol_donch40_1h","SOL",S1,H1, 2,"Donch40",5.00,"SOL fut 1h (ladder ~2bps; QSOL pending)","Breakout Donch40 1h"),
+ # --- UPJUMP companion parents (S-2026-07-03, slice 2, [[CryptoUpJumpCompanion]]) ---
+ # Wide up-jump momentum: LONG on a 24x1h up-jump >= thr, ride to the symmetric 24-bar
+ # down-jump. Long-only spot (mult=1.0, 1 coin/contract). cost_bps=18 -> booked RT
+ # (18+2)/1e4 = 0.20% = parent COST=0.002. Per-coin thr = the STANDALONE all-6-PASS best
+ # (never judged vs-WIDE). OP = parent-only (no companion book in slice 3). UNGATED:
+ # the fixed-% up-jump was validated without a regime gate (all-6 standalone).
+ ("btc_upjump","BTC",B1,H1,18,"UpJump5", 1.0,"BTC spot up-jump (companion parent, 0.20% RT)","UpJump 5% 1h"),
+ ("eth_upjump","ETH",E1,H1,18,"UpJump8", 1.0,"ETH spot up-jump (companion parent, 0.20% RT)","UpJump 8% 1h"),
+ ("sol_upjump","SOL",S1,H1,18,"UpJump12",1.0,"SOL spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"),
+ ("doge_upjump","DOGE",D("DOGE","1h"),H1,18,"UpJump12",1.0,"DOGE spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"),
+ ("ada_upjump","ADA",D("ADA","1h"),H1,18,"UpJump8", 1.0,"ADA spot up-jump (companion parent, 0.20% RT)","UpJump 8% 1h"),
+ ("trx_upjump","TRX",D("TRX","1h"),H1,18,"UpJump8", 1.0,"TRX spot up-jump (companion parent, 0.20% RT)","UpJump 8% 1h"),
+ ("aave_upjump","AAVE",D("AAVE","1h"),H1,18,"UpJump5",1.0,"AAVE spot up-jump (companion parent, 0.20% RT)","UpJump 5% 1h"),
+ ("near_upjump","NEAR",D("NEAR","1h"),H1,18,"UpJump12",1.0,"NEAR spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"),
+ ("bnb_upjump","BNB",D("BNB","1h"),H1,18,"UpJump12",1.0,"BNB spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"),
+ ("op_upjump","OP",D("OP","1h"),H1,18,"UpJump12",1.0,"OP spot up-jump (parent-only, no companion)","UpJump 12% 1h"),
 ]
 def _unix(s):
     try: return int(datetime.datetime.strptime(s,"%Y-%m-%d %H:%M").replace(tzinfo=datetime.timezone.utc).timestamp())

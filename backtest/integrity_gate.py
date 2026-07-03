@@ -22,7 +22,10 @@ def check(path):
             if d>3.0: gaps+=1                      # >3-day hole (weekends ok for index)
         if prev_c and prev_c>0:
             jump=abs(c-prev_c)/prev_c
-            if jump>0.5: errs.append(f"row{i} x-glitch jump {jump*100:.0f}% (poss x1000)")
+            # ×1000/×100/×10 glitch = 900%..99900% single-bar. Threshold 3.0 (300%) nails
+            # every order-of-magnitude corruption while NOT false-rejecting genuine crypto 1h
+            # pumps (e.g. DOGE +70% Jan-2021 mania) — the exact wide up-jumps UpJump trades.
+            if jump>3.0: errs.append(f"row{i} x-glitch jump {jump*100:.0f}% (poss x1000)")
         prev_ts, prev_c = ts, c
         if len(errs)>8: break
     if gaps>len(rows)*0.05: errs.append(f"{gaps} gaps >3d ({100*gaps/len(rows):.0f}%)")

@@ -8,6 +8,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")
 PAIRS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 TFS   = ["1h", "4h"]
+# UpJump companion parents (S-2026-07-03, slice 2): 1h ONLY (24×1h up-jump window).
+# BTC/ETH/SOL 1h already pulled above -> not repeated here.
+UP1H  = ["DOGEUSDT", "ADAUSDT", "TRXUSDT", "AAVEUSDT", "NEARUSDT", "BNBUSDT", "OPUSDT"]
 START_MS = int(datetime.datetime(2021, 1, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000)
 LIMIT = 1000  # Binance max rows/call
 
@@ -47,8 +50,8 @@ def last_open_ms(path):
 
 def main():
     os.makedirs(DATA, exist_ok=True)
-    for sym in PAIRS:
-        for tf in TFS:
+    for sym, tflist in [(s, TFS) for s in PAIRS] + [(s, ["1h"]) for s in UP1H]:
+        for tf in tflist:
             path = os.path.join(DATA, f"{sym}_{tf}.csv")
             prev_last = last_open_ms(path)
             start = (prev_last + 1) if prev_last else START_MS   # incremental when CSV exists
