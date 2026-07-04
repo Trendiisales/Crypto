@@ -13,7 +13,8 @@
 set -euo pipefail
 
 TAG="# [wave-companion S-2026-07-05]"
-LINE='7 * * * * cd /Users/jo/Crypto/backtest && /Users/jo/Crypto/build/wave_companion >> /tmp/wave_companion.log 2>&1  '"$TAG"
+# engine at :07, then the effect-level self-test at :08 (writes STATUS + logs RED between sessions)
+LINE='7 * * * * cd /Users/jo/Crypto/backtest && /Users/jo/Crypto/build/wave_companion >> /tmp/wave_companion.log 2>&1; /usr/bin/python3 /Users/jo/Crypto/backtest/wave_companion_selftest.py >> /tmp/wave_companion_selftest.log 2>&1  '"$TAG"
 
 TS=$(date +%Y%m%d_%H%M%S)
 BAK="/tmp/ct.bak.$TS"
@@ -21,12 +22,14 @@ BAK="/tmp/ct.bak.$TS"
 crontab -l > "$BAK" 2>/dev/null || true
 echo "[install_wave_companion_cron] backed up crontab -> $BAK"
 
+# Idempotent + UPDATE-safe: drop any prior tagged line, then add the current one. Re-running
+# after editing $LINE refreshes the schedule in place (no duplicate, no stale line left behind).
 if crontab -l 2>/dev/null | grep -qF "$TAG"; then
-    echo "[install_wave_companion_cron] already installed (marker present) -> no-op"
-    exit 0
+    if crontab -l 2>/dev/null | grep -qF "$LINE"; then
+        echo "[install_wave_companion_cron] already current -> no-op"; exit 0
+    fi
+    echo "[install_wave_companion_cron] updating existing tagged line"
 fi
-
-# append the one line, install atomically from the backup copy
-{ cat "$BAK"; echo "$LINE"; } | crontab -
-echo "[install_wave_companion_cron] INSTALLED:"
+{ grep -vF "$TAG" "$BAK"; echo "$LINE"; } | crontab -
+echo "[install_wave_companion_cron] INSTALLED/UPDATED:"
 crontab -l | grep -F "$TAG"
