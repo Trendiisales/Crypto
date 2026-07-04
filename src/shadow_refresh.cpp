@@ -119,11 +119,20 @@ int main() {
     for (auto& L : R) {
         Freshness fr = fresh_ok(L.csvf, L.sym);
         bool integ = integrity_gate(L.csvf);
+        // cross-feed VALUE gate: daily close must agree with the 4h close (catches a
+        // corrupt/rescaled daily feed that is internally smooth -> passes integrity but
+        // disagrees with the live intraday tape). See DataHealth::cross_feed_sane.
+        bool vsane = cross_feed_sane(L.csvf);
+        bool ok_fresh = fr.ok && vsane;   // value-divergence is a data-health failure -> surface as not-fresh
         json p0 = prior.slots_by_key.contains(L.key) ? prior.slots_by_key[L.key] : json::object();
         int t; double sz, px, expx;
-        if (!fr.ok) {
-            std::fprintf(stderr, "[STALE-DATA] %s %s bar_age=%.1fd file_age=%.1fd -- FROZEN\n",
-                         L.key.c_str(), L.sym.c_str(), fr.bar, fr.file);
+        if (!ok_fresh) {
+            if (!vsane)
+                std::fprintf(stderr, "[VALUE-DIVERGE] %s %s daily<->4h close diverge -- FROZEN (poss corrupt daily feed)\n",
+                             L.key.c_str(), L.sym.c_str());
+            else
+                std::fprintf(stderr, "[STALE-DATA] %s %s bar_age=%.1fd file_age=%.1fd -- FROZEN\n",
+                             L.key.c_str(), L.sym.c_str(), fr.bar, fr.file);
             t = p0.value("pos", 0); sz = 1.0;
             px = p0.contains("px") && p0["px"].get<double>() ? p0["px"].get<double>()
                  : (p0.contains("entry_px") ? p0["entry_px"].get<double>() : 0.0);
@@ -139,7 +148,7 @@ int main() {
             t = s.t; sz = s.sz; px = s.px; expx = s.expx;
         }
         if (L.sym == "NDX" && have_live_ndx) px = ndx_live_mark;
-        legs.push_back({L, fr.ok, integ, fr.ok && integ,
+        legs.push_back({L, ok_fresh, integ, ok_fresh && integ,
                         round_n(fr.bar, 1), round_n(fr.file, 1), t, sz, px, expx});
     }
     // KILL_FLAT marker (written by the GUI kill button): force every leg flat. t=0 for

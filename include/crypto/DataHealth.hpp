@@ -63,6 +63,38 @@ inline std::vector<std::string> integrity_check(const std::string& path) {
 
 inline bool integrity_gate(const std::string& path) { return integrity_check(path).empty(); }
 
+// last data-row close of a CSV (col 5), or -1 on miss/parse-fail.
+inline double last_close_of(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return -1.0;
+    std::string line, last;
+    while (std::getline(f, line))
+        if (!line.empty() && std::isdigit((unsigned char)line[0])) last = line;
+    if (last.empty()) return -1.0;
+    std::vector<std::string> c; std::stringstream ss(last); std::string cell;
+    while (std::getline(ss, cell, ',')) c.push_back(cell);
+    if (c.size() < 5) return -1.0;
+    try { return std::stod(c[4]); } catch (...) { return -1.0; }
+}
+
+// Cross-feed VALUE sanity: a leg's daily latest close must agree with the same
+// symbol's intraday (4h) latest close within tol. integrity_check only tests a
+// file against ITSELF (per-bar glitch), so it MISSES a corrupt/rescaled daily feed
+// that is internally smooth but disagrees with the live intraday tape. Canonical
+// failure: BTCUSDT_1d.csv overwritten ~5.4x on 2026-07-04 (climbed 30k->335k with
+// no single-bar >300% jump -> passed integrity) while 4h stayed ~62.5k; shadow_refresh
+// entered a phantom LONG @335720 vs real 62583 -> -81% -> desk health RED.
+// Returns true (pass) when it cannot compare (no _1d leg / missing 4h / bad values)
+// so it never false-freezes a leg it has no evidence against.
+inline bool cross_feed_sane(const std::string& daily_path, double tol = 0.50) {
+    auto pos = daily_path.rfind("_1d.csv");
+    if (pos == std::string::npos) return true;            // not a daily leg -> skip
+    std::string intr = daily_path.substr(0, pos) + "_4h.csv";
+    double dc = last_close_of(daily_path), ic = last_close_of(intr);
+    if (dc <= 0 || ic <= 0) return true;                  // can't compare -> don't freeze
+    return std::fabs(dc - ic) / ic <= tol;
+}
+
 inline double max_age_for(const std::string& sym) { return sym == "NDX" ? 4.0 : 2.5; }
 
 // (bar_age_days, file_age_days): age of newest bar + file mtime, in days. inf on error.
