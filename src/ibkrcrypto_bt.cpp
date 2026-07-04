@@ -109,15 +109,20 @@ struct Cfg {
     double be_arm        = 0.0;      // S-2026-06-25 BE-RATCHET: arm once peak >= be_arm (frac); 0=off
     double be_floor      = 0.0;      // once armed, exit when running profit falls to be_floor (0=breakeven)
     int    regime_ma     = 0;        // S-2026-06-25 REGIME GATE: only trade WITH the SMA(regime_ma)-trend (0=off)
+    double hard_stop     = 0.0;      // S-2026-07-04 CATASTROPHE floor: exit if a single trade goes >= this frac
+                                     // adverse from entry (0=off). NOT a profit-stop -- a WIDE tail cut sized so
+                                     // it never fires on normal trend pullbacks, only a gap/flash-crash. Close-based
+                                     // (conservative: eats the full close, no optimistic intrabar-stop fill).
 };
 
 // ----------------------------- result ---------------------------------------
 struct Res {
-    int n=0, wins=0; double net=0,gw=0,gl=0, peak=0,eq=0,mdd=0; long bars_in=0;
-    void trade(double pnl){ ++n; if(pnl>0){++wins;gw+=pnl;} else gl+=std::fabs(pnl); }
+    int n=0, wins=0; double net=0,gw=0,gl=0, peak=0,eq=0,mdd=0,worst=0; long bars_in=0;
+    void trade(double pnl){ ++n; if(pnl>0){++wins;gw+=pnl;} else gl+=std::fabs(pnl); if(pnl<worst)worst=pnl; }
     void mark(double e){ eq=e; if(eq>peak)peak=eq; if(peak-eq>mdd)mdd=peak-eq; }
     double pf()const{ return gl>0?gw/gl:(gw>0?999:0); }
     double wr()const{ return n?100.0*wins/n:0; }
+    double mar()const{ return mdd>0?eq/mdd:(eq>0?999:0); }   // net-return / maxDD (bigger=better)
 };
 
 // ---- core array backtest: target-position series -> faithful P&L ------------
@@ -165,6 +170,16 @@ static Res run_bt(const Series& s, const Cfg& cfg, const Strat& strat,
             if(cfg.be_arm>0){
                 double cur = curpos*(s.c[i]-entry)/entry; if(cur>peak) peak=cur;
                 if(peak>=cfg.be_arm && cur<=cfg.be_floor){
+                    double pnl=size*(carry+cur-cost); r.trade(pnl); equity+=pnl; r.mark(equity);
+                    curpos=0; peak=0; continue;
+                }
+            }
+            // S-2026-07-04 CATASTROPHE hard-stop: WIDE per-trade tail floor. Exits at this close
+            // once the trade is >= hard_stop adverse from entry. Tail circuit-breaker for a
+            // gap/flash-crash on a no-profit-stop trend leg; sized to never fire on normal pullbacks.
+            if(cfg.hard_stop>0){
+                double cur = curpos*(s.c[i]-entry)/entry;
+                if(cur <= -cfg.hard_stop){
                     double pnl=size*(carry+cur-cost); r.trade(pnl); equity+=pnl; r.mark(equity);
                     curpos=0; peak=0; continue;
                 }
@@ -418,6 +433,49 @@ int main(int argc,char**argv){
     if(const char* rg=getenv("REGIME_MA")) cfg.regime_ma=atoi(rg);
     if(const char* ac=getenv("ANNUAL_CARRY")) cfg.annual_carry=atof(ac);     // flat TFA fallback (NDX/equity legs)
     if(const char* uf=getenv("USE_REAL_FUND")) cfg.use_real_fund=(atoi(uf)!=0); // 1 = use overlaid funding (real SQF/perp basis)
+    if(const char* vt=getenv("VTTGT"))    cfg.vt_target=atof(vt);   // vol-target notional-vol/day (0=off), sweepable
+    if(const char* hs=getenv("HARDSTOP")) cfg.hard_stop=atof(hs);   // catastrophe per-trade tail cut frac (0=off)
+    // --protect-sweep STRAT : S-2026-07-04 crypto parent protection audit. For the given roster
+    // mode, sweep {vt_target x hard_stop} across the 4 bear regimes + FULL/OOS; print
+    // net / maxDD / MAR / worst-trade per (config,window). Answers: does vol-target + a WIDE
+    // catastrophe floor cut tail DD/worst-trade WITHOUT degrading net/PF/MAR? (edge-preserving check).
+    for(int i=1;i<argc;++i) if(std::string(argv[i])=="--protect-sweep"){
+        std::string st=(i+1<argc)?argv[i+1]:"EMAx";
+        struct W{const char*name;int64_t a,b;};
+        const W keyw[] = {
+            {"2018_bear", 1514764800000LL,1546214400000LL},
+            {"2020_covid",1577836800000LL,1609372800000LL},
+            {"2022_bear", 1640995200000LL,1672444800000LL},
+            {"LAST_6M",   1766534400000LL,1799999999000LL},
+            {"OOS_23-26", 1672531200000LL,1799999999000LL},
+            {"FULL",      1483228800000LL,1799999999000LL},
+        };
+        const double VTS[] = {0.0, 0.015, 0.02, 0.025};
+        const double HSS[] = {0.0, 0.20, 0.25, 0.30};
+        auto run=[&](auto strat){
+            std::printf("=== [%s] %s protect-sweep (cost=%.1fbps RT, LONG-ONLY) ===\n",
+                s.sym.c_str(), st.c_str(), cfg.cost_bps+2*cfg.half_spread_bps);
+            std::printf("%-8s %-6s | %-10s %8s %8s %6s %6s %8s\n",
+                "vt","hstop","window","net%","maxDD%","MAR","PF","worst%");
+            for(double vt: VTS) for(double hs: HSS){
+                Cfg e=cfg; e.vt_target=vt; e.hard_stop=hs;
+                for(const auto& w: keyw){
+                    Res r=run_bt(s,e,strat,w.a,w.b); if(r.n<3) continue;
+                    std::printf("%-8.3f %-6.2f | %-10s %+8.1f %8.1f %6.2f %6.2f %+8.1f\n",
+                        vt, hs, w.name, 100*r.eq, 100*r.mdd, r.mar(), r.pf(), 100*r.worst);
+                }
+                std::printf("%-8s %-6s |\n","","");
+            }
+        };
+        if(st=="EMAx")        run(EMAx(20,50));
+        else if(st=="Kelt")   run(Kelt(20,2.0));
+        else if(st=="Regime") run(Regime(20,0.40,0.25));
+        else if(st=="IBS")    run(IBS(0.15,0.85));
+        else if(st=="TSMom50")run(TSMom(50));
+        else if(st=="RSIrev") run(RSIrev(14,30,70));
+        else { std::fprintf(stderr,"unknown strat %s\n",st.c_str()); return 1; }
+        return 0;
+    }
     // --dollars MULT FEE_USD STRAT : min-lot (1 contract) dollar P&L, LAST_6M + FULL
     for(int i=1;i<argc;++i) if(std::string(argv[i])=="--dollars"){
         double mult=(i+1<argc)?atof(argv[i+1]):0.01;
