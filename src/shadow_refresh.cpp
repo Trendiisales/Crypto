@@ -132,7 +132,10 @@ int main() {
             t = 0; sz = 1.0; px = 0.0; expx = 0.0;
         } else {
             int rma = gated_strats().count(L.strat) ? regime_gate_ma() : 0;
-            Sig s = run_signal(L.sym, L.csvf, L.cost, L.strat, rma);
+            // vol-target size dial: 0.015 on the crypto trend/Regime legs, 0 (pool-only) on IBS/NDX.
+            // See CryptoParentProtection audit -- the sole edge-preserving parent protection.
+            double vt = vt_target_for(L.sym, L.strat);
+            Sig s = run_signal(L.sym, L.csvf, L.cost, L.strat, rma, vt);
             t = s.t; sz = s.sz; px = s.px; expx = s.expx;
         }
         if (L.sym == "NDX" && have_live_ndx) px = ndx_live_mark;
@@ -152,9 +155,14 @@ int main() {
     for (auto& g : legs) legrefs.push_back({g.L.key, g.L.sym, g.L.csvf, g.L.strat});
     auto cmap = corr_downsize(legrefs);
 
-    auto qty_for = [&](double px_basis, double mult, double scale) -> long {
+    // vt_mult = vol-target size multiplier for this leg (1.0 on pool-only legs). Capped
+    // de-risk-ONLY at 1.0: shrink notional in high-vol tape, never over-deploy the pool.
+    // This is where CryptoParentProtection's vt=0.015 finally reaches REAL notional (the
+    // percent-book already carried sz; qty_for previously ignored it).
+    auto qty_for = [&](double px_basis, double mult, double scale, double vt_mult) -> long {
         double pc = px_basis * mult;
-        return pc > 0 ? std::max(1L, py_round_int(per_leg * scale / pc)) : 1L;
+        double vt = std::min(vt_mult, 1.0);
+        return pc > 0 ? std::max(1L, py_round_int(per_leg * scale * vt / pc)) : 1L;
     };
 
     // ── pass 2: size + P&L ──
@@ -175,7 +183,7 @@ int main() {
         double c = (L.cost + 2) / 10000.0;
         double cum_usd = p.value("realized_usd", 0.0);
         auto cm = cmap[L.key]; double corr = cm.first, scale = cm.second;
-        long qty = qty_for((t != 0 && epx > 0) ? epx : px, L.mult, scale);
+        long qty = qty_for((t != 0 && epx > 0) ? epx : px, L.mult, scale, sz);
 
         double peak_usd = (p.contains("peak_usd") && p["peak_usd"].is_number()) ? p["peak_usd"].get<double>() : 0.0;
         long   peak_ts  = (p.contains("peak_ts")  && p["peak_ts"].is_number())  ? p["peak_ts"].get<long>()    : 0;
@@ -251,7 +259,7 @@ int main() {
                     << "," << fmt(r_usd, 2) << "\n";
             }
             if (t != 0) {
-                epx = px; ets = json(now); qty = qty_for(epx, L.mult, scale);
+                epx = px; ets = json(now); qty = qty_for(epx, L.mult, scale, sz);
                 peak_usd = 0.0; peak_ts = unix_from(now); be_peak = 0.0;
                 led << now << "," << L.key << ",OPEN " << t << "," << t << ","
                     << fmt(px, 4) << ",," << fmt(cum, 3) << "\n";

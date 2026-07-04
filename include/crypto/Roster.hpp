@@ -40,6 +40,21 @@ inline const std::set<std::string>& gated_strats() {
     return g;
 }
 
+// VOL-TARGET size dial (S-2026-07-04b, CryptoParentProtection audit). The single
+// edge-preserving protection for the crypto PARENT long engines: shrink notional in
+// high-vol tape (size = clamp(vt/realized_vol), capped de-risk-only at 1.0 live so the
+// book never over-deploys the pool). Backtested vt=0.015 across 2017-2026 + 4 bear
+// regimes: cuts maxDD/worst-trade hard, MAR holds/improves. Applies to the crypto
+// TREND/MOMENTUM/REGIME legs ONLY. EXCLUDED: IBS (crypto mean-rev -- breaks under vt,
+// BTC IBS net +87->-0.7%) and NDX (index, own protection). 0 => pool-only sizing.
+inline double vt_target_for(const std::string& sym, const std::string& strat) {
+    double vt = std::atof(env_or("CRYPTO_VT_TARGET", "0.015").c_str());  // tunable; 0 disables all
+    if (vt <= 0) return 0.0;
+    if (sym == "NDX") return 0.0;                    // index legs: own protection, not vol-targeted
+    static const std::set<std::string> vt_strats{"EMAx", "Kelt", "Regime", "Roc"};
+    return vt_strats.count(strat) ? vt : 0.0;        // IBS + anything else: pool-only
+}
+
 // live-fidelity cost overlays
 inline int slip_bps(const std::string& sym) {
     static const std::map<std::string, int> s{{"BTC", 3}, {"ETH", 3}, {"SOL", 5}, {"NDX", 1}};

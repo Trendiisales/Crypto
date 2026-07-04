@@ -473,6 +473,7 @@ int main(int argc,char**argv){
         else if(st=="IBS")    run(IBS(0.15,0.85));
         else if(st=="TSMom50")run(TSMom(50));
         else if(st=="RSIrev") run(RSIrev(14,30,70));
+        else if(st=="Roc")    run(Roc(20,0.0));
         else { std::fprintf(stderr,"unknown strat %s\n",st.c_str()); return 1; }
         return 0;
     }
@@ -496,8 +497,11 @@ int main(int argc,char**argv){
     // --signal STRAT : print current target position + vol-target size at the latest bar (for live/shadow book)
     for(int i=1;i<argc;++i) if(std::string(argv[i])=="--signal"){
         std::string st=(i+1<argc)?argv[i+1]:"TSMom50";
-        const int N=s.n(); Cfg e=cfg; e.vt_target=0.02;
-        auto vtsz=[&](int bi)->double{ int lb=e.vt_lb; if(bi<lb+1)return e.vt_min; double m=0,s2=0;
+        // vol-target multiplier: VTTGT env (already folded into cfg.vt_target) DRIVES the live size.
+        // 0 => sz=1.0 (pool-only, for IBS/NDX legs). >0 => clamp(vt/rv) (trend/Regime crypto legs, 0.015).
+        // No VTTGT set => 0.02 legacy DISPLAY default (unchanged for manual runs; live always passes VTTGT).
+        const int N=s.n(); Cfg e=cfg; if(!getenv("VTTGT")) e.vt_target=0.02;
+        auto vtsz=[&](int bi)->double{ if(e.vt_target<=0) return 1.0; int lb=e.vt_lb; if(bi<lb+1)return e.vt_min; double m=0,s2=0;
             for(int j=bi-lb+1;j<=bi;++j)m+=(s.c[j]-s.c[j-1])/s.c[j-1]; m/=lb;
             for(int j=bi-lb+1;j<=bi;++j){double r=(s.c[j]-s.c[j-1])/s.c[j-1];s2+=(r-m)*(r-m);}
             double rv=std::sqrt(s2/lb); if(rv<=0)return e.vt_min; double z=e.vt_target/rv;

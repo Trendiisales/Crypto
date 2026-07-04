@@ -47,9 +47,12 @@ inline bool parse_after(const std::string& ln, const std::string& tok, double& o
 struct Sig { int t; double sz; double px; double expx; };
 
 inline Sig run_signal(const std::string& sym, const std::string& csvf, int cost,
-                      const std::string& strat, int rma) {
+                      const std::string& strat, int rma, double vt = 0.0) {
+    // vt>0 => request the vol-target size multiplier (CryptoParentProtection, vt=0.015 on the
+    // crypto trend/Regime legs). vt=0 => VTTGT=0 => the bt emits size=1.0 (pool-only).
     std::string cmd = cost_env_prefix(sym)
-        + "COSTBPS=" + std::to_string(cost) + " REGIME_MA=" + std::to_string(rma) + " "
+        + "COSTBPS=" + std::to_string(cost) + " REGIME_MA=" + std::to_string(rma)
+        + " VTTGT=" + std::to_string(vt) + " "
         + "'" + bt_bin() + "' " + sym + " '" + csvf + "' --signal " + strat + " 2>/dev/null";
     std::string out = run_capture(cmd);
     std::stringstream ss(out); std::string ln;
