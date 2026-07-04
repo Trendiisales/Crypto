@@ -10,14 +10,18 @@
 //   * ARM STEP  : a wave arms on the first +STEP% advance above a trailing-low reference;
 //                 each further +STEP% NEW HIGH opens ANOTHER stacked companion (uncapped).
 //   * REVERSAL  : price gives back REV% from the wave peak  -> close ALL companions.
-//   * STAGNATION: no new wave high within STAG_H hours      -> close ALL companions.
+//   * STAGNATION: no new wave high within STAG_H hours (PER-COIN) -> close ALL companions.
 //   * COLD CUT  : per-companion, if its OWN price falls COLD% below its arm while the wave
 //                 is still open, cut THAT companion early at its stop (independent book).
-//                 Backtested: 8% cut is STRICTLY better both coins (more net, less DD).
+//                 Backtested S-2026-07-05: this cut is the ONLY per-trade reversal guard
+//                 (REV/STAG close the whole stack, not a per-companion loss). Tighter=safer:
+//                 4% DOMINATES 8% at the per-coin STAGs -- MORE net AND ~half the worst clip,
+//                 all-6 pass, both halves + all thirds positive, smooth (non-overfit) gradient.
 //
-// Defaults (the shipped config): STEP 1% / STAG 48h / REV 15% / COLD 8% / cost 0.20% RT.
-// Parity target (5.5yr Binance 1h, raw price-unit net, bull-gated):
-//     ETH ~ $44,636   BTC ~ $566,304   (companions/wave mean 7.1 / 5.4).
+// Defaults (locked config S-2026-07-05): STEP 1% / STAG ETH 24h + BTC 48h / REV 15% / COLD 4%.
+// Parity target (5.5yr Binance 1h, raw price-unit net, bull-gated, COLD 4%):
+//     ETH@24h ~ $64,911   BTC@48h ~ $683,010   (companions/wave mean ETH 4.9 / BTC 5.4; worst clip
+//     ETH -$293  BTC -$5,165). REV 15% kept: tightening it hurts net + gives NO worst-clip gain.
 //
 // Faithful-by-construction: each run REPLAYS the full 1h history (a pure function of the
 // data), so the book can never drift from the backtest. State = the emitted ledger.
@@ -100,9 +104,11 @@ struct Wave { long start_ms; std::vector<Comp> comps; double peak; long peak_ms;
 
 int main(){
     const double STEP   = std::stod(env_or("STEP",   "0.01"));
-    const long   STAG_MS= (long)(std::stod(env_or("STAG_H","48")) * 3600000L);
+    // STAG is PER-COIN (backtest S-2026-07-05): ETH 24h / BTC 48h -- each coin's net-max at the
+    // locked COLD 4%. STAG_H (global) overrides BOTH coins when set >0 (parity sweeps only).
+    const double STAG_H_OVR = std::stod(env_or("STAG_H","0"));
     const double REV    = std::stod(env_or("REV",    "0.15"));
-    const double COLD   = std::stod(env_or("COLD",   "0.08"));   // 0 disables the per-companion cut
+    const double COLD   = std::stod(env_or("COLD",   "0.04"));   // 0 disables the per-companion cut
     const double COST_RT= std::stod(env_or("COST_RT","0.002"));
     const double POOL   = std::stod(env_or("POOL_USD","10000"));
     const double CUSD   = std::stod(env_or("COMPANION_USD","1000")); // $ notional per companion (shadow)
@@ -123,6 +129,11 @@ int main(){
     int tot_open_comp=0, tot_closed_comp=0;
 
     for(const auto& coin : COINS){
+        // per-coin stagnation window (global STAG_H override wins for parity sweeps)
+        const std::string stag_key = std::string("STAG_")+coin;
+        double stag_h = STAG_H_OVR>0 ? STAG_H_OVR
+                      : std::stod(env_or(stag_key.c_str(), coin=="BTC" ? "48" : "24"));
+        const long STAG_MS = (long)(stag_h*3600000L);
         const std::string p1 = csv_dir()+"/"+coin+"USDT_1h.csv";
         const std::string pd = csv_dir()+"/"+coin+"USDT_1d.csv";
         auto bars = load_1h(p1);
@@ -219,7 +230,7 @@ int main(){
         tot_real_usd+=coin_real; tot_open_usd+=coin_open; tot_raw_unit+=coin_raw;
         tot_open_comp+=nopen; tot_closed_comp+=nclosed;
         coins_json.push_back({
-            {"coin",coin},{"skipped",false},{"fresh",fresh},{"integ",integ},
+            {"coin",coin},{"skipped",false},{"fresh",fresh},{"integ",integ},{"stag_h",stag_h},
             {"waves",(int)waves.size()},{"closed_comps",nclosed},{"open_comps",nopen},
             {"realized_usd",round_n(coin_real,2)},{"open_unreal_usd",round_n(coin_open,2)},
             {"raw_unit_net",round_n(coin_raw,0)},
@@ -232,7 +243,8 @@ int main(){
 
     json out = {
         {"engine","CryptoWaveCompanion"},{"mode","SHADOW"},{"updated",now+" UTC"},
-        {"config",{{"step",STEP},{"stag_h",STAG_MS/3600000.0},{"rev",REV},{"cold",COLD},
+        {"config",{{"step",STEP},{"stag_per_coin","ETH 24h / BTC 48h"},
+                   {"stag_h_override",STAG_H_OVR},{"rev",REV},{"cold",COLD},
                    {"cost_rt",COST_RT},{"pool_usd",POOL},{"companion_usd",CUSD},
                    {"bull_gate","daily close>200DMA"},{"long_only",true}}},
         {"realized_usd",round_n(tot_real_usd,2)},{"open_unreal_usd",round_n(tot_open_usd,2)},
