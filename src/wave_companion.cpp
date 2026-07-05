@@ -2,11 +2,13 @@
 //
 // A SEPARATE INDEPENDENT engine (operator hard rule, both systems): it NEVER touches the
 // parent it rides; every companion clip is a STANDALONE additive book, judged all-6, NEVER
-// vs riding WIDE (CompanionDominanceError). Long-only, bullish waves only.
+// vs riding WIDE (CompanionDominanceError). Long-only.
+//
+// NO 200DMA anywhere (operator hard rule 2026-07-06, feedback-no-200dma-crypto): the former
+// daily-close>200DMA BULL-GATE is REMOVED. Waves arm on price structure alone, any regime.
 //
 // MODEL (locked from backtest/crypto_ladder_companion.py + crypto_wave_companions.py,
 // verdict S-2026-07-04):
-//   * BULL-GATE : a wave may arm only while (as-of) daily close > 200DMA (BearSpotNoEdge).
 //   * ARM STEP  : a wave arms on the first +STEP% advance above a trailing-low reference;
 //                 each further +STEP% NEW HIGH opens ANOTHER stacked companion (uncapped).
 //   * REVERSAL  : price gives back REV% from the wave peak  -> close ALL companions.
@@ -19,9 +21,12 @@
 //                 all-6 pass, both halves + all thirds positive, smooth (non-overfit) gradient.
 //
 // Defaults (locked config S-2026-07-05): STEP 1% / STAG ETH 24h + BTC 48h / REV 15% / COLD 4%.
-// Parity target (5.5yr Binance 1h, raw price-unit net, bull-gated, COLD 4%):
+// Parity target — SUPERSEDED by the 2026-07-06 200DMA removal. The figures below were the
+// bull-GATED backtest (5.5yr Binance 1h, raw price-unit net, COLD 4%):
 //     ETH@24h ~ $64,911   BTC@48h ~ $683,010   (companions/wave mean ETH 4.9 / BTC 5.4; worst clip
 //     ETH -$293  BTC -$5,165). REV 15% kept: tightening it hurts net + gives NO worst-clip gain.
+// Un-gated (arms every regime) the book is LARGER but NOT independently backtested for the extra
+// bear-regime waves it now takes -- treat forward figures as observe-only until re-swept.
 //
 // Faithful-by-construction: each run REPLAYS the full 1h history (a pure function of the
 // data), so the book can never drift from the backtest. State = the emitted ledger.
@@ -65,39 +70,6 @@ static std::vector<Bar> load_1h(const std::string& path){
     std::sort(v.begin(),v.end(),[](const Bar&a,const Bar&b){return a.ms<b.ms;});
     return v;
 }
-// daily -> (sorted day_ms, close-by-ms, dma-by-ms) mirroring the backtest bull_asof.
-struct Daily { std::vector<long> day_ms; std::map<long,double> cby, dma; };
-static Daily load_daily(const std::string& path){
-    Daily d; std::vector<Bar> rows;
-    std::ifstream f(path); if(!f.is_open()) return d;
-    std::string ln; bool first=true;
-    while(std::getline(f,ln)){
-        if(ln.empty()) continue;
-        if(first){ first=false; if(ln[0]<'0'||ln[0]>'9') continue; }
-        long t; double o,h,l,c;
-        if(std::sscanf(ln.c_str(),"%ld,%lf,%lf,%lf,%lf",&t,&o,&h,&l,&c)!=5) continue;
-        if(t<1000000000000L) t*=1000;
-        rows.push_back({t,c});
-    }
-    std::sort(rows.begin(),rows.end(),[](const Bar&a,const Bar&b){return a.ms<b.ms;});
-    std::vector<double> closes; closes.reserve(rows.size());
-    for(auto& r:rows) closes.push_back(r.c);
-    for(size_t i=0;i<rows.size();++i){
-        d.day_ms.push_back(rows[i].ms); d.cby[rows[i].ms]=rows[i].c;
-        if(i>=200){ double s=0; for(size_t k=i-200;k<i;++k) s+=closes[k]; d.dma[rows[i].ms]=s/200.0; }
-    }
-    return d;
-}
-// bull = (as-of most recent completed day <= ms with a 200DMA) close > 200DMA. Match backtest.
-static bool bull_asof(const Daily& d, long ms){
-    if(d.day_ms.empty()) return true;
-    int i = (int)(std::upper_bound(d.day_ms.begin(),d.day_ms.end(),ms) - d.day_ms.begin()) - 1;
-    while(i>=1 && !d.dma.count(d.day_ms[i])) --i;
-    if(i<1) return true;                       // pre-200d history -> bull-neutral
-    long dd=d.day_ms[i];
-    return d.cby.at(dd) > d.dma.at(dd);
-}
-
 struct Comp { long arm_ms; double arm_px, cold_stop; bool cold; long exit_ms; double exit_px; };
 struct Wave { long start_ms; std::vector<Comp> comps; double peak; long peak_ms;
               long exit_ms; double exit_px; bool open; };
@@ -135,9 +107,7 @@ int main(){
                       : std::stod(env_or(stag_key.c_str(), coin=="BTC" ? "48" : "24"));
         const long STAG_MS = (long)(stag_h*3600000L);
         const std::string p1 = csv_dir()+"/"+coin+"USDT_1h.csv";
-        const std::string pd = csv_dir()+"/"+coin+"USDT_1d.csv";
         auto bars = load_1h(p1);
-        Daily dly = load_daily(pd);
         DataAge age = data_age_days(p1);
         bool integ = integrity_gate(p1);
         bool fresh = age.bar <= 3.0 && age.file <= 3.0;  // 1h book: ~3d bound
@@ -155,7 +125,7 @@ int main(){
             long ms = bars[i].ms; double px = bars[i].c;
             if(px < ref) ref = px;
             if(px >= ref*(1+STEP)){
-                if(!bull_asof(dly, ms)){ ref = px; ++i; continue; }   // BULL-GATE
+                // NO 200DMA gate (operator hard rule 2026-07-06): arm on structure, any regime.
                 Wave w; w.start_ms=ms; w.peak=px; w.peak_ms=ms; w.open=true;
                 double last_arm=px;
                 w.comps.push_back({ms,px,px*(1-COLD),false,0,0.0});    // companion #1
@@ -246,7 +216,7 @@ int main(){
         {"config",{{"step",STEP},{"stag_per_coin","ETH 24h / BTC 48h"},
                    {"stag_h_override",STAG_H_OVR},{"rev",REV},{"cold",COLD},
                    {"cost_rt",COST_RT},{"pool_usd",POOL},{"companion_usd",CUSD},
-                   {"bull_gate","daily close>200DMA"},{"long_only",true}}},
+                   {"bull_gate","NONE (200DMA removed 2026-07-06)"},{"long_only",true}}},
         {"realized_usd",round_n(tot_real_usd,2)},{"open_unreal_usd",round_n(tot_open_usd,2)},
         {"total_usd",round_n(tot_real_usd+tot_open_usd,2)},
         {"bank_bp",round_n((tot_real_usd+tot_open_usd)/POOL*10000.0,1)},

@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""wave_companion_selftest.py — EFFECT-LEVEL alarm for CryptoWaveCompanion (S-2026-07-05).
+"""wave_companion_selftest.py — EFFECT-LEVEL alarm for CryptoWaveCompanion (S-2026-07-05,
+de-200DMA'd S-2026-07-06).
 
 WHY THIS EXISTS (operator, 05-07-2026): the wave engine produced 0 trades and NOTHING told
-us whether that was "correctly dormant (bull-gated below 200DMA)" or "dead / stale-fed / logic
-broken". Silence is ambiguous. This test asserts FUNCTION, not existence, and — crucially —
-DISTINGUISHES the two: a coin below its 200DMA SHOULD be flat (bull-gate = BearSpotNoEdge), but a
-coin ABOVE its 200DMA that is making fresh highs and STILL shows no armed companion is BROKEN and
-must SCREAM. Mirrors tools/protection_selftest.py (the stall-accountant self-test) for the wave book.
+us whether that was "correctly quiet (no wave to arm on)" or "dead / stale-fed / logic broken".
+Silence is ambiguous. This test asserts FUNCTION, not existence, and DISTINGUISHES the two.
+
+NO 200DMA (operator hard rule 2026-07-06, feedback-no-200dma-crypto): the former bull-gate is
+GONE. The engine arms on price structure alone, ANY regime. So silence is only "correctly quiet"
+when there is genuinely no recent +STEP% advance (between waves). A coin making a fresh new high
+in the last STAG window with 0 armed companions is BROKEN and must SCREAM.
 
 CHECKS (each pass/fail independently; overall RED if any fail):
   [1] SCHEDULED + ALIVE   — wave_companion in cron AND wrote state.json in the last ALIVE_MIN.
-  [2] INPUT FRESH         — BTC+ETH 1h & 1d feeds recent (a stale feed => wrong regime call, the
-                            exact blind spot that made "0 trades" look fine on old prices).
-  [3] SILENCE EXPLAINED   — per coin: bull-gate state + gap-to-200DMA. Below 200DMA => 0 trades is
-                            CORRECT (report it, GREEN). Above 200DMA + a fresh new-high in the last
-                            STAG window + 0 armed companions => BROKEN (RED, "should be screaming").
-  [4] FIRES ON TRIGGER    — synthetic bull + rising +1% series in a sandbox => engine MUST arm
-                            companions. Proves the arm/stack logic actually RUNS (not just exists).
+  [2] INPUT FRESH         — BTC+ETH 1h feed recent (the engine is 1h-only now; a stale feed =>
+                            silence on OLD prices, the exact blind spot that made "0 trades" look fine).
+  [3] SILENCE EXPLAINED   — per coin: is price making a fresh new-high in the last STAG window?
+                            Fresh high + 0 armed => BROKEN (RED, "should be screaming"). No fresh
+                            high => quiet is CORRECT (report it, GREEN).
+  [4] FIRES ON TRIGGER    — synthetic rising +1% series in a sandbox => engine MUST arm companions.
+                            Proves the arm/stack logic actually RUNS (not just exists).
   [5] COMPUTES A BOOK     — replay real data in a sandbox => both coins produce waves + closed
                             comps + finite net (deterministic faithful replay still sane).
 
@@ -49,15 +52,16 @@ def _load(path):
     rows.sort()
     return rows
 
-def _regime(coin):
-    """(is_bull, gap_pct, last_px, dma) from the daily feed — bull = last close > 200DMA."""
-    d = _load(os.path.join(DATA, f"{coin}USDT_1d.csv"))
-    if len(d) < 201:
-        return (None, None, None, None)
-    closes = [c for _, c in d]
-    dma = sum(closes[-201:-1]) / 200.0
-    last = closes[-1]
-    return (last > dma, 100.0 * (last / dma - 1.0), last, dma)
+def _fresh_high(coin):
+    """(advancing, last_px) — advancing = last 1h close is within STEP of the running max of the
+    last STAG window, i.e. a new wave high is being made right now (arm-eligible, any regime)."""
+    h1 = _load(os.path.join(DATA, f"{coin}USDT_1h.csv"))
+    if not h1:
+        return (None, None)
+    stag_h = 48 if coin == "BTC" else 24
+    recent = [p for ms, p in h1 if ms >= h1[-1][0] - stag_h * 3600_000]
+    advancing = bool(recent) and h1[-1][1] >= max(recent) * (1 - STEP)
+    return (advancing, h1[-1][1])
 
 # ---- [1] SCHEDULED + ALIVE ---------------------------------------------------
 def check_scheduled_alive():
@@ -72,21 +76,20 @@ def check_scheduled_alive():
     elif not alive:   detail += "  *** STALE -- cron not firing / engine crashed ***"
     record("[1] SCHEDULED+ALIVE", ok, detail)
 
-# ---- [2] INPUT FRESH ---------------------------------------------------------
+# ---- [2] INPUT FRESH (1h only -- engine is 1h-driven, no daily) --------------
 def check_input_fresh():
     probs = []
     for coin in COINS:
-        for tf, maxd in (("1h", 3.0), ("1d", 3.0)):
-            rows = _load(os.path.join(DATA, f"{coin}USDT_{tf}.csv"))
-            if not rows:
-                probs.append(f"{coin}_{tf} MISSING"); continue
-            age = (time.time()*1000 - rows[-1][0]) / 86400_000
-            if age > maxd:
-                probs.append(f"{coin}_{tf} {age:.1f}d stale (>{maxd:.0f}d) -> regime call on OLD prices")
+        rows = _load(os.path.join(DATA, f"{coin}USDT_1h.csv"))
+        if not rows:
+            probs.append(f"{coin}_1h MISSING"); continue
+        age = (time.time()*1000 - rows[-1][0]) / 86400_000
+        if age > 3.0:
+            probs.append(f"{coin}_1h {age:.1f}d stale (>3d) -> silence on OLD prices")
     ok = not probs
-    record("[2] INPUT-FRESH", ok, "BTC+ETH 1h/1d feeds fresh" if ok else "*** " + "; ".join(probs) + " ***")
+    record("[2] INPUT-FRESH", ok, "BTC+ETH 1h feeds fresh" if ok else "*** " + "; ".join(probs) + " ***")
 
-# ---- [3] SILENCE EXPLAINED (dormant-vs-broken) -------------------------------
+# ---- [3] SILENCE EXPLAINED (quiet-vs-broken, NO 200DMA) ----------------------
 def check_silence_explained():
     st = {}
     if os.path.exists(STATE):
@@ -95,23 +98,16 @@ def check_silence_explained():
     by = {c.get("coin"): c for c in st.get("coins", [])}
     notes, broken = [], []
     for coin in COINS:
-        is_bull, gap, last, dma = _regime(coin)
-        if is_bull is None:
-            broken.append(f"{coin}: <201 daily bars, cannot judge regime"); continue
+        advancing, last = _fresh_high(coin)
+        if advancing is None:
+            broken.append(f"{coin}: no 1h data, cannot judge"); continue
         opencomps = int(by.get(coin, {}).get("open_comps", 0) or 0)
-        if not is_bull:
-            notes.append(f"{coin} DORMANT-OK ({gap:+.1f}% below 200DMA; arms when >200DMA)")
+        if advancing and opencomps == 0:
+            broken.append(f"{coin}: fresh new-high but 0 armed -> SHOULD BE SCREAMING")
+        elif advancing:
+            notes.append(f"{coin} ADVANCING, open_comps={opencomps}")
         else:
-            # bull: is price making a fresh high recently? (last 1h close == running max of last STAG_H?)
-            h1 = _load(os.path.join(DATA, f"{coin}USDT_1h.csv"))
-            stag_h = 48 if coin == "BTC" else 24
-            recent = [p for ms, p in h1 if ms >= h1[-1][0] - stag_h*3600_000] if h1 else []
-            advancing = bool(recent) and h1[-1][1] >= max(recent) * (1 - STEP)
-            if advancing and opencomps == 0:
-                broken.append(f"{coin}: BULL (+{gap:.1f}% >200DMA) + fresh high but 0 armed -> SHOULD BE SCREAMING")
-            else:
-                notes.append(f"{coin} BULL (+{gap:.1f}%), open_comps={opencomps}"
-                             + ("" if advancing else ", no fresh high (between waves)"))
+            notes.append(f"{coin} QUIET-OK (no fresh high in STAG window; between waves), open_comps={opencomps}")
     ok = not broken
     detail = "; ".join(notes) if ok else "*** " + "; ".join(broken) + " *** | " + "; ".join(notes)
     record("[3] SILENCE-EXPLAINED", ok, detail)
@@ -122,19 +118,12 @@ def check_fires_on_trigger():
     try:
         ddir = os.path.join(sb, "data"); os.makedirs(ddir)
         odir = os.path.join(sb, "out")
-        # 260 daily bars: flat 100 for 250 then a bull ramp so last close > 200DMA (bull-gate ON)
         day0 = 1_600_000_000_000
         for coin in COINS:
-            with open(os.path.join(ddir, f"{coin}USDT_1d.csv"), "w") as f:
-                f.write("open_time_ms,open,high,low,close\n")
-                for i in range(260):
-                    c = 100.0 if i < 250 else 100.0 + (i-249)*3.0   # ramp above the 200DMA
-                    ms = day0 + i*86400_000
-                    f.write(f"{ms},{c},{c},{c},{c}\n")
-            # 1h: 120 bars rising +1% each -> forces MANY stacked companions (adjacent jump 1% << 300%)
+            # 1h: 120 bars rising +1% each -> forces MANY stacked companions (no regime gate now)
             with open(os.path.join(ddir, f"{coin}USDT_1h.csv"), "w") as f:
                 f.write("open_time_ms,open,high,low,close\n")
-                base = day0 + 259*86400_000
+                base = day0
                 px = 130.0
                 for i in range(120):
                     ms = base + i*3600_000
@@ -148,7 +137,7 @@ def check_fires_on_trigger():
             d = json.load(open(sp))
             opened = d.get("open_comps", 0); closed = d.get("closed_comps", 0)
         fired = (opened + closed) > 0
-        detail = (f"synthetic bull+rising -> companions armed={opened+closed} "
+        detail = (f"synthetic rising -> companions armed={opened+closed} "
                   + ("(fires correctly)" if fired else "DID NOT ARM *** arm logic BROKEN ***"))
         if not fired and r.stderr: detail += " | " + r.stderr.strip().splitlines()[-1][:120]
         record("[4] FIRES-ON-TRIGGER", fired, detail)
@@ -189,7 +178,7 @@ def main():
     check_computes_book()
     overall = all(ok for _, ok, _ in results)
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    head = "GREEN -- wave engine FUNCTIONAL (dormant is explained, not broken)" if overall else "RED -- WAVE ENGINE PROBLEM"
+    head = "GREEN -- wave engine FUNCTIONAL (quiet is explained, not broken)" if overall else "RED -- WAVE ENGINE PROBLEM"
     lines = [f"WAVE-COMPANION SELF-TEST {head}  ({ts})"]
     for name, ok, detail in results:
         lines.append(f"  {'PASS' if ok else 'FAIL'} {name}: {detail}")
