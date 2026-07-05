@@ -1,0 +1,101 @@
+{
+ "bank_bp": 69944.7,
+ "closed_comps": 6185,
+ "coins": [
+  {
+   "bar_age_d": 0.0,
+   "closed_comps": 2221,
+   "coin": "BTC",
+   "comps_per_wave": {
+    "max": 39,
+    "mean": 5.0,
+    "p50": 3,
+    "p90": 11
+   },
+   "file_age_d": 0.0,
+   "fresh": true,
+   "integ": true,
+   "open": [
+    {
+     "arm_px": 60815.99,
+     "cold_stop": 58383.3504,
+     "mret_frac": 0.03053,
+     "unreal_usd": 30.53
+    },
+    {
+     "arm_px": 61424.1499,
+     "cold_stop": 58967.1839,
+     "mret_frac": 0.02031,
+     "unreal_usd": 20.31
+    },
+    {
+     "arm_px": 62038.3914,
+     "cold_stop": 59556.8557,
+     "mret_frac": 0.01018,
+     "unreal_usd": 10.18
+    },
+    {
+     "arm_px": 62658.7753,
+     "cold_stop": 60152.4243,
+     "mret_frac": 0.00016,
+     "unreal_usd": 0.16
+    },
+    {
+     "arm_px": 63285.3631,
+     "cold_stop": 60753.9485,
+     "mret_frac": -0.00976,
+     "unreal_usd": -9.76
+    }
+   ],
+   "open_comps": 5,
+   "open_unreal_usd": 51.42,
+   "raw_unit_net": 791706.0,
+   "realized_usd": 24574.29,
+   "skipped": false,
+   "stag_h": 48.0,
+   "waves": 442
+  },
+  {
+   "bar_age_d": 0.0,
+   "closed_comps": 3964,
+   "coin": "ETH",
+   "comps_per_wave": {
+    "max": 45,
+    "mean": 4.5,
+    "p50": 3,
+    "p90": 10
+   },
+   "file_age_d": 0.0,
+   "fresh": true,
+   "integ": true,
+   "open": [],
+   "open_comps": 0,
+   "open_unreal_usd": 0.0,
+   "raw_unit_net": 81334.0,
+   "realized_usd": 45318.95,
+   "skipped": false,
+   "stag_h": 24.0,
+   "waves": 874
+  }
+ ],
+ "config": {
+  "bull_gate": "NONE (200DMA removed 2026-07-06)",
+  "cold": 0.04,
+  "companion_usd": 1000.0,
+  "cost_rt": 0.002,
+  "long_only": true,
+  "pool_usd": 10000.0,
+  "rev": 0.15,
+  "stag_h_override": 0.0,
+  "stag_per_coin": "ETH 24h / BTC 48h",
+  "step": 0.01
+ },
+ "engine": "CryptoWaveCompanion",
+ "mode": "SHADOW",
+ "open_comps": 5,
+ "open_unreal_usd": 51.42,
+ "raw_unit_net": 873039.0,
+ "realized_usd": 69893.24,
+ "total_usd": 69944.66,
+ "updated": "2026-07-05 20:07 UTC"
+}

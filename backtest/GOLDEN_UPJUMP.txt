@@ -1,0 +1,17 @@
+# GOLDEN known-answer for the faithful UpJump parent harness.
+# Immutable regression fixture: count of parent UpJump2 (uniform +2%/4h -> resampled
+# per BT_TF_MS=3600000) trades whose ENTRY timestamp < 2025-01-01 (1735689600000 ms).
+# Bounded to a fixed historical window so appending fresh bars CANNOT shift these numbers.
+# Produced by the ONE canonical tool: src/ibkrcrypto_bt.cpp built to backtest/ibkrcrypto_bt,
+# driven DUMP_TRADES=1 BT_TF_MS=3600000 ./ibkrcrypto_bt <SYM> data/<SYM>USDT_1h.csv --dump-trades UpJump2
+# (TRADE lines emit on STDERR -- merge 2>&1). Any run that disagrees = drift -> STOP, do not verdict.
+BTC 330
+ETH 397
+SOL 551
+DOGE 507
+BNB 382
+ADA 492
+TRX 340
+NEAR 577
+AAVE 546
+OP 361

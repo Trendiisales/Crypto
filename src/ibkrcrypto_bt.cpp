@@ -144,7 +144,8 @@ static Res run_bt(const Series& s, const Cfg& cfg, const Strat& strat,
         if(rv<=0) return cfg.vt_min; double z=cfg.vt_target/rv;
         return std::max(cfg.vt_min,std::min(cfg.vt_max,z));
     };
-    int curpos=0; double entry=0, carry=0, size=1.0, equity=0, peak=0;
+    int curpos=0; double entry=0, carry=0, size=1.0, equity=0, peak=0; int entry_i=0;
+    static const bool DUMP_TR = (std::getenv("DUMP_TRADES")!=nullptr);
     for(int i=1;i<N;++i){
         if(s.ts[i] < t0 || s.ts[i] > t1){ curpos=0; peak=0; continue; } // outside window: flat
         int want = strat.signal(s, i-1);             // decided @close i-1
@@ -190,14 +191,18 @@ static Res run_bt(const Series& s, const Cfg& cfg, const Strat& strat,
                 double ret = curpos*(s.o[i]-entry)/entry;
                 double pnl = size*(carry + ret - cost);
                 r.trade(pnl); equity+=pnl; r.mark(equity);
+                if(DUMP_TR && t0<=1483228800000LL && t1>=1799999999000LL) std::fprintf(stderr,"TRADE %lld %lld %.8f %d %.4f\n",
+                    (long long)s.ts[entry_i],(long long)s.ts[i],entry,curpos,size);
             }
-            if(want!=0){ entry=s.o[i]; carry=0; size=sizer(i-1); peak=0; }
+            if(want!=0){ entry=s.o[i]; carry=0; size=sizer(i-1); peak=0; entry_i=i; }
             curpos=want;
         }
     }
     if(curpos!=0){                                    // flatten runner @last close
         double ret = curpos*(s.c[N-1]-entry)/entry;
         double pnl = size*(carry + ret - cost); r.trade(pnl); equity+=pnl; r.mark(equity);
+        if(DUMP_TR && t0<=1483228800000LL && t1>=1799999999000LL) std::fprintf(stderr,"TRADE %lld %lld %.8f %d %.4f\n",
+            (long long)s.ts[entry_i],(long long)s.ts[N-1],entry,curpos,size);
     }
     return r;
 }
@@ -475,6 +480,17 @@ int main(int argc,char**argv){
         else if(st=="RSIrev") run(RSIrev(14,30,70));
         else if(st=="Roc")    run(Roc(20,0.0));
         else { std::fprintf(stderr,"unknown strat %s\n",st.c_str()); return 1; }
+        return 0;
+    }
+    // --dump-trades STRAT : DUMP_TRADES=1 dumps each FULL-window parent trade
+    // (entry_ts exit_ts entry_px dir size) to stderr for the companion-clip overlay.
+    // Only this ONE strat runs -> no cross-strategy dump pollution.
+    for(int i=1;i<argc;++i) if(std::string(argv[i])=="--dump-trades"){
+        std::string st=(i+1<argc)?argv[i+1]:"UpJump8";
+        Cfg e=cfg; e.vt_target=0.02;   // .vt sizing (timing identical to non-vt)
+        int64_t F0=1483228800000LL, T1=1799999999000LL;
+        if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; run_bt(s,e,UpJump(thr),F0,T1); }
+        else if(st=="TSMom50") run_bt(s,e,TSMom(50),F0,T1);
         return 0;
     }
     // --dollars MULT FEE_USD STRAT : min-lot (1 contract) dollar P&L, LAST_6M + FULL
