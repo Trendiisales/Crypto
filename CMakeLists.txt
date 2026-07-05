@@ -45,6 +45,10 @@ crypto_exe(shadow_refresh_intraday src/shadow_refresh_intraday.cpp Threads::Thre
 # Wave-stacked companion — long-only bull-gated wave scale-out (S-2026-07-04). Pure stdlib.
 crypto_exe(wave_companion   src/wave_companion.cpp   Threads::Threads)
 
+# Stall companion — 3 crypto-intraday giveback-clip books (C++ port of the last SKIP_OMEGA=1
+# stall_accountant.py cron lines). json.hpp + stdlib.
+crypto_exe(stall_companion  src/stall_companion.cpp  Threads::Threads)
+
 # Data fetch — needs libcurl + json.
 crypto_exe(fetch            src/fetch.cpp            CURL::libcurl)
 
