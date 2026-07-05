@@ -30,6 +30,7 @@ import os, sys, json, subprocess, tempfile, shutil, time, csv, bisect
 HOME   = os.path.expanduser("~")
 CRYPTO = os.path.join(HOME, "Crypto")
 BIN    = os.path.join(CRYPTO, "build", "wave_companion")
+SRC    = os.path.join(CRYPTO, "src", "wave_companion.cpp")
 DATA   = os.path.join(CRYPTO, "backtest", "data")
 STATE  = os.path.join(DATA, "wave_companion", "state.json")
 STATUS = os.path.join(HOME, ".claude", "wave_companion_selftest_STATUS.txt")
@@ -52,16 +53,21 @@ def _load(path):
     rows.sort()
     return rows
 
-def _fresh_high(coin):
-    """(advancing, last_px) — advancing = last 1h close is within STEP of the running max of the
-    last STAG window, i.e. a new wave high is being made right now (arm-eligible, any regime)."""
-    h1 = _load(os.path.join(DATA, f"{coin}USDT_1h.csv"))
-    if not h1:
-        return (None, None)
-    stag_h = 48 if coin == "BTC" else 24
-    recent = [p for ms, p in h1 if ms >= h1[-1][0] - stag_h * 3600_000]
-    advancing = bool(recent) and h1[-1][1] >= max(recent) * (1 - STEP)
-    return (advancing, h1[-1][1])
+def _replay_open(datadir):
+    """Run the CURRENT binary on the REAL 1h data in a sandbox out-dir; return {coin: open_comps}.
+    The engine is a PURE FUNCTION of the data, so this is the AUTHORITATIVE open-comp count for
+    'now'. Used to reconcile the live cron state (correct == live matches this replay)."""
+    sb = tempfile.mkdtemp(prefix="wavecomp_reconcile_")
+    try:
+        subprocess.run([BIN], env=dict(os.environ, WAVECOMP_DATADIR=sb),
+                       capture_output=True, text=True)
+        sp = os.path.join(sb, "state.json")
+        if not os.path.exists(sp):
+            return None
+        d = json.load(open(sp))
+        return {c.get("coin"): int(c.get("open_comps", 0) or 0) for c in d.get("coins", [])}
+    finally:
+        shutil.rmtree(sb, ignore_errors=True)
 
 # ---- [1] SCHEDULED + ALIVE ---------------------------------------------------
 def check_scheduled_alive():
@@ -89,25 +95,53 @@ def check_input_fresh():
     ok = not probs
     record("[2] INPUT-FRESH", ok, "BTC+ETH 1h feeds fresh" if ok else "*** " + "; ".join(probs) + " ***")
 
-# ---- [3] SILENCE EXPLAINED (quiet-vs-broken, NO 200DMA) ----------------------
+# ---- [2b] BINARY FRESH (source built into the running binary) ----------------
+def check_binary_fresh():
+    """The failure that actually bit us 2026-07-06: the 200DMA-removal + config fix were COMMITTED
+    but the binary was compiled ~1min BEFORE them, so the live cron ran stale logic for hours and
+    nothing flagged it. A stale binary is invisible to a replay-reconcile (both use the same BIN).
+    Guard it directly: the binary must be at least as new as the source it is built from."""
+    if not (os.path.exists(BIN) and os.path.exists(SRC)):
+        record("[2b] BINARY-FRESH", False, "*** binary or source missing ***"); return
+    bt = os.path.getmtime(BIN); st = os.path.getmtime(SRC)
+    ok = bt >= st
+    if ok:
+        detail = f"binary built {time.strftime('%m-%d %H:%M', time.localtime(bt))} >= source {time.strftime('%m-%d %H:%M', time.localtime(st))}"
+    else:
+        lag = (st - bt) / 60.0
+        detail = f"*** SOURCE {lag:.0f}min NEWER than binary -> STALE BINARY, rebuild (cmake --build build --target wave_companion) ***"
+    record("[2b] BINARY-FRESH", ok, detail)
+
+# ---- [3] SILENCE EXPLAINED (replay-reconcile, NO fresh-high proxy) ------------
 def check_silence_explained():
-    st = {}
+    """Silence must be EXPLAINED, never assumed. The engine is a PURE FUNCTION of the 1h data,
+    so the ONLY correct open-comp count for 'now' is a faithful replay of that data. Reconcile the
+    live cron state against a fresh replay: equal => whatever it shows (active OR 0-open) is
+    correct-BY-CONSTRUCTION, not a guess. Diverged => the live state is stale/crashed => RED.
+    This replaces the old 'within-STEP-of-24h-max' fresh-high proxy, which false-RED'd whenever
+    price sat near a short-window max while the engine was legitimately between waves (its true
+    peak older than the window, or price short of the +STEP re-arm above the last wave exit)."""
+    live = {}
     if os.path.exists(STATE):
-        try: st = json.load(open(STATE))
-        except Exception: st = {}
-    by = {c.get("coin"): c for c in st.get("coins", [])}
+        try: live = {c.get("coin"): int(c.get("open_comps", 0) or 0)
+                     for c in json.load(open(STATE)).get("coins", [])}
+        except Exception: live = {}
+    auth = _replay_open(DATA)
+    if not auth:
+        record("[3] SILENCE-EXPLAINED", False, "*** faithful replay produced no state -> binary broken ***"); return
     notes, broken = [], []
     for coin in COINS:
-        advancing, last = _fresh_high(coin)
-        if advancing is None:
-            broken.append(f"{coin}: no 1h data, cannot judge"); continue
-        opencomps = int(by.get(coin, {}).get("open_comps", 0) or 0)
-        if advancing and opencomps == 0:
-            broken.append(f"{coin}: fresh new-high but 0 armed -> SHOULD BE SCREAMING")
-        elif advancing:
-            notes.append(f"{coin} ADVANCING, open_comps={opencomps}")
+        a = auth.get(coin); l = live.get(coin)
+        if a is None:
+            broken.append(f"{coin}: replay produced no state"); continue
+        if l is None:
+            broken.append(f"{coin}: live state MISSING -> cron not writing"); continue
+        if l != a:
+            broken.append(f"{coin}: live open={l} != faithful replay open={a} -> LIVE STATE STALE/DIVERGED")
+        elif a > 0:
+            notes.append(f"{coin} ACTIVE open_comps={a} (live==replay)")
         else:
-            notes.append(f"{coin} QUIET-OK (no fresh high in STAG window; between waves), open_comps={opencomps}")
+            notes.append(f"{coin} between-waves 0-open (live==replay; no +{STEP*100:.0f}% break above last wave exit -> correctly quiet)")
     ok = not broken
     detail = "; ".join(notes) if ok else "*** " + "; ".join(broken) + " *** | " + "; ".join(notes)
     record("[3] SILENCE-EXPLAINED", ok, detail)
@@ -173,6 +207,7 @@ def main():
         print(f"WAVE-COMPANION SELF-TEST RED -- binary missing: {BIN}"); sys.exit(1)
     check_scheduled_alive()
     check_input_fresh()
+    check_binary_fresh()
     check_silence_explained()
     check_fires_on_trigger()
     check_computes_book()
