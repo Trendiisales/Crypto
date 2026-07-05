@@ -110,14 +110,9 @@ static std::vector<ILeg> intraday_roster() {
     };
 }
 
-// REGIME GATE (S-2026-06-30): TRUE 200-day gate, tf-scaled to bars, ETH-ONLY on
-// EMAx/TSMom50/Ichi. REGIME_GATE_MA_DAYS=0 disables.
-static int regime_gate_ma_days() { return std::atoi(env_or("REGIME_GATE_MA_DAYS", "200").c_str()); }
-static bool is_gated(const std::string& sym, const std::string& strat) {
-    static const std::set<std::pair<std::string,std::string>> g{
-        {"ETH","EMAx"}, {"ETH","TSMom50"}, {"ETH","Ichi"}};
-    return g.count({sym, strat}) > 0;
-}
+// REGIME GATE — REMOVED 2026-07-06 (operator hard rule, feedback-no-200dma-crypto: NO 200DMA
+// anywhere in crypto). The former ETH-only 200-day gate on EMAx/TSMom50/Ichi is gone; legs run
+// ungated (REGIME_MA=0 to the bt binary). Do NOT re-add a 200DMA/200MA regime gate here.
 
 // FRESHNESS GUARD: tf-scaled. 4h -> ~14h, 1h -> ~5.4h.
 static double max_age_days_tf(long tf_ms) { return (tf_ms / 86400000.0) * 3.0 + 0.1; }
@@ -274,8 +269,7 @@ int main() {
         } else if (!integ) {
             t = 0; sz = 1.0; px = 0.0; expx = 0.0;
         } else {
-            long rma = is_gated(L.sym, L.strat)
-                       ? py_round_int((double)regime_gate_ma_days() * 86400000.0 / (double)L.tf_ms) : 0;
+            long rma = 0;   // 200d regime gate REMOVED 2026-07-06 (feedback-no-200dma-crypto)
             Sig s = run_signal_tf(L.sym, L.csvf, L.cost, L.strat, rma, L.tf_ms);
             t = s.t; sz = s.sz; px = s.px; expx = s.expx;
         }

@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 """
+*** RETIRED 2026-07-06 — 200MA gate banned (operator hard rule, feedback-no-200dma-crypto) ***
+LukeCrypto's ONLY edge is the BTC>200MA market gate (see REGIME line below: "ungated dies 2022
+-65% bear, -$112k; gated sidesteps"). The operator has BANNED 200DMA/200MA anywhere in crypto and
+called it "shit". An engine whose entire viability is the banned gate is non-viable under the rule,
+so it is retired rather than run de-gated (a de-gated LukeCrypto is a known -65% bear loser). The
+live daily cron (`refresh_luke_shadow.py`) is DISABLED (crontab commented 2026-07-06; backup
+/tmp/ct.bak.20260706_010741). Do NOT re-enable without a NEW edge that does not depend on 200MA.
+
 LukeCryptoEngine — faithful crypto momentum engine, validated 2026-06-25.
 Recovered from Trash + given a --live emitter for the IBKRCrypto shadow book (2026-06-30).
 

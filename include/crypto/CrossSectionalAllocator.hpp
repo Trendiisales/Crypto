@@ -4,14 +4,16 @@
 // vault entity [[CrossSectionalMomentum]] OOS figures EXACTLY). This is the LIVE spot
 // sleeve: the per-symbol EdgeEngine never had a portfolio path, so nothing emitted
 // spot targets. This allocator ranks the daily-close universe each rebalance, goes
-// LONG the top-K positive-momentum coins, inverse-vol weights them, and sits in cash
-// when the macro regime is bear (BTC < 200d SMA).
+// LONG the top-K positive-momentum coins, inverse-vol weights them.
 //
-// Operator directive "live crypto = C++ producers": the reference lived in Python;
-// this is the live producer. Long-only + BTC-gate mirror the spot route's invariants
-// and the [[BearSpotNoEdge]] tombstone (no spot-long edge when BTC<200DMA).
+// BTC>200d-SMA MACRO GATE REMOVED 2026-07-06 (operator hard rule, feedback-no-200dma-crypto:
+// NO 200DMA anywhere in crypto). macro_gate=false / regime_ma=0 -> is_bull() is always true;
+// the allocator no longer sits in cash below the 200d SMA. Do NOT re-add the BTC 200DMA gate.
 //
-// Validated config (the plateau centre): lb=30, K=3, rebal=14, invvol, macro_gate.
+// Operator directive "live crypto = C++ producers": the reference lived in Python; this is the
+// live producer. Long-only retained; the [[BearSpotNoEdge]] 200DMA gate is gone.
+//
+// Validated config (the plateau centre): lb=30, K=3, rebal=14, invvol (macro_gate now OFF).
 #ifndef IBKRCRYPTO_CROSS_SECTIONAL_ALLOCATOR_H
 #define IBKRCRYPTO_CROSS_SECTIONAL_ALLOCATOR_H
 
@@ -34,8 +36,8 @@ public:
     int    lb        = 30;      // trailing-return lookback (days)
     int    K         = 3;       // top-K long
     int    vol_win   = 30;      // realized-vol window for inverse-vol weights
-    int    regime_ma = 200;     // BTC macro-gate SMA length
-    bool   macro_gate = true;
+    int    regime_ma = 0;       // BTC macro-gate REMOVED 2026-07-06 (feedback-no-200dma-crypto)
+    bool   macro_gate = false;  // NO 200DMA anywhere in crypto (operator hard rule)
     std::string btc_key = "btcusdt";
 
     // ---- signal primitives (faithful to xsec_allocator.py) ---------------------
@@ -65,7 +67,8 @@ public:
         return var>0.0 ? std::sqrt(var) : NAN;
     }
 
-    // BTC>200d-SMA portfolio macro gate on bar i.
+    // BTC 200d-SMA macro gate — DISABLED (macro_gate=false by default, 2026-07-06 no-200dma rule).
+    // Always returns true now; SMA path kept only for the disabled/legacy branch.
     bool is_bull(const std::unordered_map<std::string,std::vector<double>>& close, int i) const {
         if(!macro_gate) return true;
         auto it = close.find(btc_key);
