@@ -97,16 +97,19 @@ static std::vector<ILeg> intraday_roster() {
      {"sol_emax_1h","SOL",S1,H1, 2,"EMAx",   5.00,"SOL fut 1h (ladder ~2bps)","Trend EMAx 1h"},
      {"sol_donch40_1h","SOL",S1,H1, 2,"Donch40",5.00,"SOL fut 1h (ladder ~2bps; QSOL pending)","Breakout Donch40 1h"},
      // --- UPJUMP companion parents (S-2026-07-03, CryptoUpJumpCompanion) ---
-     {"btc_upjump","BTC",B1,H1,18,"UpJump5", 1.0,"BTC spot up-jump (companion parent, 0.20% RT)","UpJump 5% 1h"},
-     {"eth_upjump","ETH",E1,H1,18,"UpJump8", 1.0,"ETH spot up-jump (companion parent, 0.20% RT)","UpJump 8% 1h"},
-     {"sol_upjump","SOL",S1,H1,18,"UpJump12",1.0,"SOL spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"},
-     {"doge_upjump","DOGE",D("DOGE","1h"),H1,18,"UpJump12",1.0,"DOGE spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"},
-     {"ada_upjump","ADA",D("ADA","1h"),H1,18,"UpJump8", 1.0,"ADA spot up-jump (companion parent, 0.20% RT)","UpJump 8% 1h"},
-     {"trx_upjump","TRX",D("TRX","1h"),H1,18,"UpJump8", 1.0,"TRX spot up-jump (companion parent, 0.20% RT)","UpJump 8% 1h"},
-     {"aave_upjump","AAVE",D("AAVE","1h"),H1,18,"UpJump5",1.0,"AAVE spot up-jump (companion parent, 0.20% RT)","UpJump 5% 1h"},
-     {"near_upjump","NEAR",D("NEAR","1h"),H1,18,"UpJump12",1.0,"NEAR spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"},
-     {"bnb_upjump","BNB",D("BNB","1h"),H1,18,"UpJump12",1.0,"BNB spot up-jump (companion parent, 0.20% RT)","UpJump 12% 1h"},
-     {"op_upjump","OP",D("OP","1h"),H1,18,"UpJump12",1.0,"OP spot up-jump (parent-only, no companion)","UpJump 12% 1h"},
+     // UNIFORM 2% TRIGGER (S-2026-07-06, operator hard rule feedback-test-operator-spec-before-verdict):
+     // ALL cryptos trade the SAME way -- a +2% up-jump (covers 0.20% RT cost) arms long + rides to
+     // stall/reversal, ×2 companion. NO per-symbol 5/8/12% thresholds. Do NOT re-tier these per coin.
+     {"btc_upjump","BTC",B1,H1,18,"UpJump2", 1.0,"BTC spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"eth_upjump","ETH",E1,H1,18,"UpJump2", 1.0,"ETH spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"sol_upjump","SOL",S1,H1,18,"UpJump2", 1.0,"SOL spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"doge_upjump","DOGE",D("DOGE","1h"),H1,18,"UpJump2",1.0,"DOGE spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"ada_upjump","ADA",D("ADA","1h"),H1,18,"UpJump2", 1.0,"ADA spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"trx_upjump","TRX",D("TRX","1h"),H1,18,"UpJump2", 1.0,"TRX spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"aave_upjump","AAVE",D("AAVE","1h"),H1,18,"UpJump2",1.0,"AAVE spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"near_upjump","NEAR",D("NEAR","1h"),H1,18,"UpJump2",1.0,"NEAR spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"bnb_upjump","BNB",D("BNB","1h"),H1,18,"UpJump2",1.0,"BNB spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     {"op_upjump","OP",D("OP","1h"),H1,18,"UpJump2",1.0,"OP spot up-jump (parent-only, no companion)","UpJump 2% 1h"},
     };
 }
 
