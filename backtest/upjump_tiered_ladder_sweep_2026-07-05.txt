@@ -1,0 +1,49 @@
+
+=== BTC  parent W=4h thr=+8%  (8 trades) ===
+  2-TIER  TIGHT a3/s0/g50/rc5[rev]  WIDE a5/s0/g50/rc5[rev]  ladder-cap5
+          n= 115 net=    +452% PF=2.32 H1=  +109 H2=  +343 bull=  +408 bear=   +44  [PASS]
+
+=== ETH  parent W=4h thr=+5%  (100 trades) ===
+  2-TIER  TIGHT a3/s0/g50/rc5[rev]  WIDE a8/s0/g50/rc5[rev]  ladder-cap5
+          n= 393 net=    +494% PF=1.38 H1=  +146 H2=  +348 bull=  +112 bear=  +382  [PASS]
+
+=== SOL  parent W=4h thr=+12%  (18 trades) ===
+  2-TIER  TIGHT a2/s0/g50/rc5[rev]  WIDE a8/s0/g50/rc5[rev]  ladder-cap5
+          n= 196 net=   +3459% PF=5.15 H1= +2131 H2= +1328 bull= +1418 bear= +2041  [PASS]
+
+=== DOGE  parent W=8h thr=+5%  (254 trades) ===
+  2-TIER  TIGHT a3/s3/g0/rc5[stall]  WIDE a8/s8/g40/rc5[both]  ladder-cap5
+          n=1267 net=   +2203% PF=1.60 H1= +1926 H2=  +277 bull=  +365 bear= +1839  [PASS]
+
+=== BNB  parent W=4h thr=+5%  (82 trades) ===
+  2-TIER  TIGHT a3/s3/g30/rc5[both]  WIDE a8/s0/g50/rc5[rev]  ladder-cap5
+          n= 585 net=   +1052% PF=1.85 H1=  +888 H2=  +164 bull=  +246 bear=  +806  [PASS]
+
+=== ADA  parent W=6h thr=+5%  (201 trades) ===
+  2-TIER  TIGHT a3/s4/g50/rc5[both]  WIDE a5/s6/g0/rc5[stall]  ladder-cap5
+          n=1223 net=    +930% PF=1.33 H1=  +186 H2=  +744 bull=  +385 bear=  +545  [PASS]
+
+=== TRX  parent W=8h thr=+8%  (40 trades) ===
+  2-TIER  TIGHT a3/s0/g30/rc5[rev]  WIDE a8/s6/g0/rc5[stall]  ladder-cap5
+          n= 467 net=    +803% PF=1.86 H1=  +321 H2=  +482 bull=  +413 bear=  +390  [PASS]
+
+=== NEAR  parent W=6h thr=+5%  (351 trades) ===
+  2-TIER  TIGHT a3/s0/g50/rc5[rev]  WIDE a8/s0/g50/rc5[rev]  ladder-cap5
+          n=1231 net=    +898% PF=1.25 H1=  +315 H2=  +583 bull=  +334 bear=  +564  [PASS]
+
+=== AAVE  parent W=4h thr=+5%  (247 trades) COST-COVER-GATE ===
+  2-TIER  TIGHT a1/s3/g0/rc5[stall]  WIDE a5/s6/g50/rc5[both]  ladder-cap5
+          n=1610 net=    +187% PF=1.04 H1=    +2 H2=  +185 bull=   +62 bear=  +126  [PASS]
+
+================================================================================================================
+ROSTER — tiered + self-funding ladder, per-tier free exit lever, STANDALONE all-6, RT-0.20%
+coin  trig      mode   tier-1 (base/tight)        tier-2 (wide)                  net    PF   bull   bear
+BTC   4h/+8%    2tier  a3/s0/g50/rc5[rev]         a5/s0/g50/rc5[rev]            +452  2.32   +408    +44
+ETH   4h/+5%    2tier  a3/s0/g50/rc5[rev]         a8/s0/g50/rc5[rev]            +494  1.38   +112   +382
+SOL   4h/+12%   2tier  a2/s0/g50/rc5[rev]         a8/s0/g50/rc5[rev]           +3459  5.15  +1418  +2041
+DOGE  8h/+5%    2tier  a3/s3/g0/rc5[stall]        a8/s8/g40/rc5[both]          +2203  1.60   +365  +1839
+BNB   4h/+5%    2tier  a3/s3/g30/rc5[both]        a8/s0/g50/rc5[rev]           +1052  1.85   +246   +806
+ADA   6h/+5%    2tier  a3/s4/g50/rc5[both]        a5/s6/g0/rc5[stall]           +930  1.33   +385   +545
+TRX   8h/+8%    2tier  a3/s0/g30/rc5[rev]         a8/s6/g0/rc5[stall]           +803  1.86   +413   +390
+NEAR  6h/+5%    2tier  a3/s0/g50/rc5[rev]         a8/s0/g50/rc5[rev]            +898  1.25   +334   +564
+AAVE  4h/+5%    2tier  a1/s3/g0/rc5[stall]        a5/s6/g50/rc5[both]           +187  1.04    +62   +126
