@@ -1,0 +1,80 @@
+
+====================================================================================================
+### BTC  (parent UpJump8 trades: 42)
+  LIVE  arm1 S6 R30 reclip05           n=238 net=   -70.1% PF= 0.72 H1=  -33.7 H2=  -36.4 bull=  -20.2 bear=  -50.0  [fail]
+  BEST  arm5 S0 R30 reclip00           n= 42 net=  +104.5% PF= 1.82 H1=  +14.3 H2=  +90.2 bull=   +3.3 bear= +101.2  [BEST]
+
+====================================================================================================
+### ETH  (parent UpJump8 trades: 65)
+  LIVE  arm2 S6 R50 reclip05           n=284 net=   +32.4% PF= 1.09 H1=   +8.9 H2=  +23.5 bull=  -13.7 bear=  +46.2  [fail]
+  BEST  arm2 S0 R50 reclip05           n=124 net=  +192.0% PF= 1.65 H1= +102.3 H2=  +89.7 bull=  +37.6 bear= +154.4  [BEST]
+        arm8 S0 R50 reclip05           n= 89 net=  +186.2% PF= 1.52 H1= +121.6 H2=  +64.7 bull=   +5.0 bear= +181.3  [PASS]
+        arm3 S0 R50 reclip05           n=116 net=  +156.8% PF= 1.46 H1=  +89.1 H2=  +67.7 bull=  +37.6 bear= +119.2  [PASS]
+        arm5 S0 R50 reclip05           n=102 net=  +153.1% PF= 1.42 H1= +102.3 H2=  +50.8 bull=  +24.9 bear= +128.2  [PASS]
+
+====================================================================================================
+### SOL  (parent UpJump8 trades: 150)
+  LIVE  arm3 S6 R50 reclip05           n=445 net=   +50.6% PF= 1.06 H1=   +5.2 H2=  +45.4 bull=  +73.8 bear=  -23.2  [fail]
+  BEST  arm8 S0 R50 reclip00           n=150 net=  +305.7% PF= 1.50 H1= +174.1 H2= +131.6 bull= +140.3 bear= +165.4  [BEST]
+        arm8 S0 R40 reclip00           n=150 net=  +296.3% PF= 1.49 H1= +141.5 H2= +154.8 bull= +176.0 bear= +120.3  [PASS]
+        arm8 S0 R40 reclip05           n=212 net=  +290.2% PF= 1.36 H1=  +69.4 H2= +220.7 bull= +185.2 bear= +104.9  [PASS]
+        arm8 S0 R30 reclip00           n=150 net=  +257.9% PF= 1.42 H1=  +61.4 H2= +196.5 bull= +143.8 bear= +114.1  [PASS]
+
+====================================================================================================
+### DOGE  (parent UpJump8 trades: 135)
+  LIVE  arm3 S6 R50 reclip05           n=308 net=  +378.5% PF= 1.44 H1= +422.3 H2=  -43.8 bull=  -81.3 bear= +459.9  [fail]
+  BEST  (NO config passes all-6 standalone gate)
+
+====================================================================================================
+### BNB  (parent UpJump8 trades: 60)
+  LIVE  arm3 S6 R50 reclip05           n=218 net=  +163.9% PF= 1.48 H1= +131.4 H2=  +32.4 bull=  +68.8 bear=  +95.1  [PASS]
+  BEST  arm8 S8 R00 reclip05           n=148 net=  +327.1% PF= 1.93 H1= +221.4 H2= +105.7 bull= +107.5 bear= +219.6  [BEST]
+        arm8 S10 R00 reclip05          n=142 net=  +326.1% PF= 1.98 H1= +222.5 H2= +103.6 bull= +104.4 bear= +221.8  [PASS]
+        arm8 S8 R50 reclip05           n=148 net=  +321.5% PF= 1.93 H1= +216.4 H2= +105.1 bull= +113.3 bear= +208.3  [PASS]
+        arm8 S10 R50 reclip05          n=142 net=  +316.9% PF= 1.96 H1= +213.7 H2= +103.2 bull= +112.5 bear= +204.4  [PASS]
+
+====================================================================================================
+### ADA  (parent UpJump8 trades: 102)
+  LIVE  arm2 S6 R50 reclip05           n=311 net=  +143.1% PF= 1.27 H1=  +51.2 H2=  +91.9 bull=  +77.8 bear=  +65.3  [PASS]
+  BEST  arm8 S8 R00 reclip05           n=193 net=  +317.5% PF= 1.54 H1=  +96.8 H2= +220.7 bull= +109.4 bear= +208.1  [BEST]
+        arm8 S6 R00 reclip05           n=211 net=  +308.4% PF= 1.52 H1= +102.6 H2= +205.8 bull= +101.2 bear= +207.2  [PASS]
+        arm8 S6 R40 reclip05           n=211 net=  +308.4% PF= 1.52 H1=  +96.6 H2= +211.7 bull= +104.3 bear= +204.0  [PASS]
+        arm8 S8 R40 reclip05           n=194 net=  +302.8% PF= 1.52 H1=  +89.2 H2= +213.6 bull= +104.9 bear= +197.8  [PASS]
+
+====================================================================================================
+### TRX  (parent UpJump8 trades: 59)
+  LIVE  arm2 S6 R00 reclip05           n=209 net=  +139.6% PF= 1.51 H1=  +88.4 H2=  +51.2 bull=  +91.3 bear=  +48.3  [PASS]
+  BEST  arm8 S6 R50 reclip05           n=149 net=  +169.8% PF= 1.52 H1=  +86.9 H2=  +82.9 bull=  +83.8 bear=  +86.0  [BEST]
+        arm8 S6 R00 reclip05           n=149 net=  +166.8% PF= 1.51 H1=  +82.6 H2=  +84.1 bull=  +85.0 bear=  +81.7  [PASS]
+        arm8 S6 R40 reclip05           n=149 net=  +162.2% PF= 1.49 H1=  +82.2 H2=  +80.0 bull=  +83.8 bear=  +78.4  [PASS]
+        arm8 S10 R50 reclip05          n=130 net=  +158.9% PF= 1.49 H1=  +89.6 H2=  +69.3 bull=  +61.4 bear=  +97.5  [PASS]
+
+====================================================================================================
+### NEAR  (parent UpJump8 trades: 192)
+  LIVE  arm3 S8 R00 reclip05           n=416 net=    -2.6% PF= 1.00 H1=  -15.4 H2=  +12.8 bull=   +6.8 bear=   -9.4  [fail]
+  BEST  arm5 S8 R40 reclip00           n=192 net=  +185.5% PF= 1.29 H1= +101.7 H2=  +83.8 bull=  +97.8 bear=  +87.7  [BEST]
+        arm5 S8 R50 reclip00           n=192 net=  +175.0% PF= 1.27 H1=  +99.5 H2=  +75.5 bull= +110.4 bear=  +64.7  [PASS]
+        arm5 S0 R40 reclip00           n=192 net=  +169.7% PF= 1.27 H1= +101.6 H2=  +68.1 bull=  +88.5 bear=  +81.2  [PASS]
+        arm5 S8 R00 reclip00           n=192 net=  +167.0% PF= 1.25 H1= +108.0 H2=  +59.0 bull= +118.2 bear=  +48.8  [PASS]
+
+====================================================================================================
+### AAVE  (parent UpJump8 trades: 164)
+  LIVE  arm1 S6 R00 reclip00           n=164 net=   +12.9% PF= 1.03 H1=   +0.0 H2=  +12.9 bull=  +30.4 bear=  -17.5  [fail]
+  BEST  arm8 S8 R00 reclip05           n=302 net=  +189.5% PF= 1.20 H1= +157.2 H2=  +32.3 bull=   +6.2 bear= +183.3  [BEST]
+        arm8 S6 R00 reclip05           n=325 net=  +179.3% PF= 1.19 H1= +122.3 H2=  +57.1 bull=   +6.2 bear= +173.1  [PASS]
+        arm8 S10 R30 reclip00          n=164 net=  +175.2% PF= 1.26 H1=  +11.7 H2= +163.5 bull=  +37.7 bear= +137.6  [PASS]
+        arm8 S8 R00 reclip00           n=164 net=  +172.7% PF= 1.25 H1=   +3.8 H2= +168.9 bull=  +37.6 bear= +135.1  [PASS]
+
+
+====================================================================================================
+SUMMARY — best-net passing all-6 STANDALONE vs live roster (net %, all clips, RT-20bp)
+coin  LIVE cfg                 LIVE net LIVE ok   BEST cfg                 BEST net   uplift
+BTC   arm1/S6/R30/rc5             -70.1    fail   arm5/S0/R30/rc0            +104.5     +174.6
+ETH   arm2/S6/R50/rc5             +32.4    fail   arm2/S0/R50/rc5            +192.0     +159.6
+SOL   arm3/S6/R50/rc5             +50.6    fail   arm8/S0/R50/rc0            +305.7     +255.2
+DOGE  arm3/S6/R50/rc5            +378.5    fail   (none pass)                    --
+BNB   arm3/S6/R50/rc5            +163.9    PASS   arm8/S8/R0/rc5             +327.1     +163.2
+ADA   arm2/S6/R50/rc5            +143.1    PASS   arm8/S8/R0/rc5             +317.5     +174.4
+TRX   arm2/S6/R0/rc5             +139.6    PASS   arm8/S6/R50/rc5            +169.8      +30.2
+NEAR  arm3/S8/R0/rc5               -2.6    fail   arm5/S8/R40/rc0            +185.5     +188.1
+AAVE  arm1/S6/R0/rc0              +12.9    fail   arm8/S8/R0/rc5             +189.5     +176.6
