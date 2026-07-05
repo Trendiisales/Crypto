@@ -25,8 +25,10 @@
 // bull-GATED backtest (5.5yr Binance 1h, raw price-unit net, COLD 4%):
 //     ETH@24h ~ $64,911   BTC@48h ~ $683,010   (companions/wave mean ETH 4.9 / BTC 5.4; worst clip
 //     ETH -$293  BTC -$5,165). REV 15% kept: tightening it hurts net + gives NO worst-clip gain.
-// Un-gated (arms every regime) the book is LARGER but NOT independently backtested for the extra
-// bear-regime waves it now takes -- treat forward figures as observe-only until re-swept.
+// Un-gated (arms every regime) RE-SWEPT 2026-07-06 (Omega backtest/wave_ungated_all6_sweep.py):
+// PASSES all-6 both coins -- BTC net $790,785 PF1.41, ETH net $81,130 PF1.53; the BEAR-regime book
+// is NET POSITIVE (BTC +$384k / ETH +$20.6k), so the gate was never needed for all-6. Locked config
+// = top net on both coins. worst clip BTC -$5,165 / ETH -$293.
 //
 // Faithful-by-construction: each run REPLAYS the full 1h history (a pure function of the
 // data), so the book can never drift from the backtest. State = the emitted ledger.
