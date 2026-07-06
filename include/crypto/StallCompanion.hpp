@@ -359,14 +359,25 @@ private:
             p.ext_bar = std::atoll(t[7].c_str()); p.mfe_pct = std::atof(t[8].c_str());
             p.mfe_usd = std::atof(t[9].c_str()); p.stall = std::atoi(t[10].c_str());
             p.last_upnl = std::atof(t[11].c_str());
-            pos_[t[0]] = p;
+            // Rebuild the key from the row's own fields: migrates any legacy "%.4f"-keyed rows
+            // to the pyfloat key format in place (no spurious ENGINE_EXIT/reopen churn).
+            pos_[mkkey_(p.book, p.eng, p.sym, p.entry)] = p;
         }
         std::ifstream g(clipped_path_);
         while (std::getline(g, line)) {
             std::vector<std::string> t = split_(line, '\t');
             if (t.size() < 2) continue;
-            clipped_[t[0]] = std::atof(t[1].c_str());
+            clipped_[normalize_key_(t[0])] = std::atof(t[1].c_str());
         }
+    }
+    // Reformat a legacy "%.4f"-entry key ("...|73.4300") to the pyfloat form ("...|73.43").
+    std::string normalize_key_(const std::string& key) const {
+        const size_t bar = key.rfind('|');
+        if (bar == std::string::npos || bar + 1 >= key.size()) return key;
+        const std::string es = key.substr(bar + 1);
+        char* end = nullptr; const double entry = std::strtod(es.c_str(), &end);
+        if (end == es.c_str() || *end != '\0') return key;
+        return key.substr(0, bar + 1) + stall_detail::pyfloat(stall_detail::round4(entry), 4);
     }
     static std::vector<std::string> split_(const std::string& s, char d) {
         std::vector<std::string> out; std::string cur;

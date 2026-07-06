@@ -281,6 +281,14 @@ struct Roc : Strat<Roc>{ int N; double thr; Roc(int n,double t):N(n),thr(t){}
 // recent bar whose |W-bar jump| >= thr decides direction (mirrors the parent
 // ride-to-symmetric-flip; DonchHold-style stateless hold). W=24 (24x1h) per parent.
 struct UpJump : Strat<UpJump>{ double thr; int W; UpJump(double t,int w=24):thr(t),W(w){}
+    // name form "UpJump<pct>[x<Wbars>]": UpJump2 = 2%/24bars (legacy), UpJump4x48 = 4%/48bars
+    // (S-2026-07-07 walk-forward sweep verdict: majors ride the BIG slow jump, not the 2%/24h one).
+    static UpJump parse(const std::string& st){
+        double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05;
+        int w=24; size_t x=st.find('x');
+        if(x!=std::string::npos){ int v=atoi(st.c_str()+x+1); if(v>0)w=v; }
+        return UpJump(thr,w);
+    }
     int sig(const Series& s,int i)const{ if(i<W)return 0;
         for(int k=i;k>=W;--k){ double j=s.c[k]/s.c[k-W]-1.0;
             if(j>= thr) return 1;      // most recent event = up-jump -> long
@@ -489,7 +497,7 @@ int main(int argc,char**argv){
         std::string st=(i+1<argc)?argv[i+1]:"UpJump8";
         Cfg e=cfg; e.vt_target=0.02;   // .vt sizing (timing identical to non-vt)
         int64_t F0=1483228800000LL, T1=1799999999000LL;
-        if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; run_bt(s,e,UpJump(thr),F0,T1); }
+        if(st.rfind("UpJump",0)==0){ run_bt(s,e,UpJump::parse(st),F0,T1); }
         else if(st=="TSMom50") run_bt(s,e,TSMom(50),F0,T1);
         return 0;
     }
@@ -505,7 +513,7 @@ int main(int argc,char**argv){
             if(st=="TSMom50") run_dollars(w,s,d,TSMom(50),mult,fee,a,b);
             else if(st=="IBS") run_dollars(w,s,d,IBS(0.15,0.85),mult,fee,a,b);
             else if(st=="Donch40") run_dollars(w,s,d,DonchHold(40),mult,fee,a,b);
-            else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; run_dollars(w,s,d,UpJump(thr),mult,fee,a,b); }
+            else if(st.rfind("UpJump",0)==0){ run_dollars(w,s,d,UpJump::parse(st),mult,fee,a,b); }
         };
         go("LAST_6M",S6,T1); go("FULL_17-26",F0,T1);
         return 0;
@@ -551,7 +559,7 @@ int main(int argc,char**argv){
         else if(st=="Roc"){ Roc S(20,0.0); t=S.signal(s,N-1); ex=flip(S,t); }
         else if(st=="TSMom20"){ TSMom S(20); t=S.signal(s,N-1); ex=flip(S,t); }
         else if(st=="Donch20"){ DonchHold S(20); t=S.signal(s,N-1); ex=flip(S,t); }
-        else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; UpJump S(thr); t=S.signal(s,N-1); ex=flip(S,t); }
+        else if(st.rfind("UpJump",0)==0){ UpJump S=UpJump::parse(st); t=S.signal(s,N-1); ex=flip(S,t); }
         // REGIME GATE (S-2026-06-30): honour REGIME_MA in the live --signal path. run_bt
         // already gates; --signal previously did NOT -> the live shadow legs ran ungated.
         // Per-symbol close>SMA(regime_ma): long only above the MA, short only below. 0=off.
@@ -587,7 +595,7 @@ int main(int argc,char**argv){
         else if(st=="Roc") dump_equity(s,e,Roc(20,0.0),T0,T1);
         else if(st=="RSIrev") dump_equity(s,e,RSIrev(14,30,70),T0,T1);
         else if(st=="Regime") dump_equity(s,e,Regime(20,0.40,0.25),T0,T1);
-        else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; dump_equity(s,e,UpJump(thr),T0,T1); }
+        else if(st.rfind("UpJump",0)==0){ dump_equity(s,e,UpJump::parse(st),T0,T1); }
         return 0;
     }
     // --postrace STRAT [FROM_MS TO_MS] : per-bar `ts,pos,cumret` (whole-month book reconstruction)
@@ -608,7 +616,7 @@ int main(int argc,char**argv){
         else if(st=="Roc") dump_postrace(s,e,Roc(20,0.0),T0,T1);
         else if(st=="RSIrev") dump_postrace(s,e,RSIrev(14,30,70),T0,T1);
         else if(st=="Regime") dump_postrace(s,e,Regime(20,0.40,0.25),T0,T1);
-        else if(st.rfind("UpJump",0)==0){ double thr=atof(st.c_str()+6)/100.0; if(thr<=0)thr=0.05; dump_postrace(s,e,UpJump(thr),T0,T1); }
+        else if(st.rfind("UpJump",0)==0){ dump_postrace(s,e,UpJump::parse(st),T0,T1); }
         return 0;
     }
     std::printf("--- price strategies (carry=%.0f%%/yr modelled as daily TFA, LONG-ONLY / shorts OFF) ---\n",100*cfg.annual_carry);

@@ -82,12 +82,17 @@ static void migrate_seed_(const std::string& dir) {
 }
 
 // ── read CRYPTO_STATE slots[] -> live rows (faithful to poll_crypto: skip pos==0) ──
-static std::vector<StallLiveRow> poll_crypto_(const std::string& state_path) {
+// ok=false on unreadable/unparseable state: the caller MUST skip the harvest -- with
+// skip_empty_guard=true an empty row-set is otherwise indistinguishable from "all real trades
+// closed" and a single torn/mid-write read would mass-ENGINE_EXIT every open companion at
+// stale marks (then reopen next cycle with reset MFE peaks).
+static std::vector<StallLiveRow> poll_crypto_(const std::string& state_path, bool& ok) {
     std::vector<StallLiveRow> rows;
+    ok = true;
     std::ifstream f(state_path);
-    if (!f.good()) { std::fprintf(stderr, "[stall-companion] CRYPTO_STATE unreadable: %s\n", state_path.c_str()); return rows; }
+    if (!f.good()) { ok = false; std::fprintf(stderr, "[stall-companion] CRYPTO_STATE unreadable: %s\n", state_path.c_str()); return rows; }
     json d;
-    try { d = json::parse(f); } catch (...) { std::fprintf(stderr, "[stall-companion] CRYPTO_STATE parse fail\n"); return rows; }
+    try { d = json::parse(f); } catch (...) { ok = false; std::fprintf(stderr, "[stall-companion] CRYPTO_STATE parse fail\n"); return rows; }
     if (!d.contains("slots") || !d["slots"].is_array()) return rows;
     for (const auto& s : d["slots"]) {
         try {
@@ -182,7 +187,13 @@ int main() {
 
     for (const auto& c : cfgs) migrate_seed_(c.dir);   // JSON->tsv once per dir before construction
 
-    const auto rows = poll_crypto_(CS);
+    bool state_ok = true;
+    const auto rows = poll_crypto_(CS, state_ok);
+    if (!state_ok) {
+        // Do NOT run the harvest off a failed read: books stay untouched, next cron retries.
+        std::fprintf(stderr, "[stall-companion] SKIP harvest (state unreadable/parse-fail); books untouched\n");
+        return 0;
+    }
 
     std::vector<StallBook> books;
     books.reserve(cfgs.size());

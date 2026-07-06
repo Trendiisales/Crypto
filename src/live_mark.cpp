@@ -14,6 +14,8 @@
 #include "crypto/StateJson.hpp"  // round_n
 #include <string>
 #include <vector>
+#include <map>
+#include <algorithm>
 #include <fstream>
 #include <cstdio>
 #include <cmath>
@@ -49,6 +51,30 @@ int main() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
     const std::string STATE = data_dir() + "/state.json";
 
+    // PASS 1 (read-only): discover which venues have open legs, then fetch each live price
+    // ONCE. The doc is re-read FRESH after the (slow, ~seconds) HTTP fetches -- previously the
+    // whole stale document was rewritten, so a shadow_refresh completing during the fetch
+    // window was clobbered (its booked flip resurrected, realized lost).
+    std::vector<std::string> want;
+    {
+        std::ifstream sf(STATE);
+        if (!sf) { std::printf("live_mark: no state.json\n"); curl_global_cleanup(); return 0; }
+        json d0;
+        try { d0 = json::parse(sf); } catch (...) { std::printf("live_mark: no state.json\n"); curl_global_cleanup(); return 0; }
+        if (d0.contains("slots") && d0["slots"].is_array())
+            for (auto& s : d0["slots"]) {
+                if (jnum(s, "pos", 0.0) == 0.0) continue;
+                std::string key = s.value("key", std::string());
+                for (auto& c : key) c = (char)std::tolower((unsigned char)c);
+                for (auto& [pre, bs] : BINANCE)
+                    if (key.rfind(pre, 0) == 0 && std::find(want.begin(), want.end(), bs) == want.end())
+                        { want.push_back(bs); break; }
+            }
+    }
+    std::map<std::string, double> live;
+    for (const auto& bs : want) { double lp = live_price(bs); if (std::isfinite(lp)) live[bs] = lp; }
+
+    // PASS 2: re-read the CURRENT document and apply the marks to it.
     std::ifstream sf(STATE);
     if (!sf) { std::printf("live_mark: no state.json\n"); curl_global_cleanup(); return 0; }
     json d;
@@ -72,8 +98,9 @@ int main() {
             for (auto& [pre, bs] : BINANCE) if (key.rfind(pre, 0) == 0) { binsym = bs; break; }
             double entry = jnum(s, "entry_px", 0.0);
             if (!binsym.empty() && entry > 0) {
-                double lp = live_price(binsym);
-                if (std::isfinite(lp)) {
+                auto lit = live.find(binsym);
+                if (lit != live.end()) {
+                    double lp = lit->second;
                     double old_pct = jnum(s, "unreal_pct", 0.0);
                     double pos = jnum(s, "pos", 0.0);
                     int side = pos > 0 ? 1 : -1;

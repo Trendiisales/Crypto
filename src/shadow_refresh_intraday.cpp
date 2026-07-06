@@ -97,12 +97,15 @@ static std::vector<ILeg> intraday_roster() {
      {"sol_emax_1h","SOL",S1,H1, 2,"EMAx",   5.00,"SOL fut 1h (ladder ~2bps)","Trend EMAx 1h"},
      {"sol_donch40_1h","SOL",S1,H1, 2,"Donch40",5.00,"SOL fut 1h (ladder ~2bps; QSOL pending)","Breakout Donch40 1h"},
      // --- UPJUMP companion parents (S-2026-07-03, CryptoUpJumpCompanion) ---
-     // UNIFORM 2% TRIGGER (S-2026-07-06, operator hard rule feedback-test-operator-spec-before-verdict):
-     // ALL cryptos trade the SAME way -- a +2% up-jump (covers 0.20% RT cost) arms long + rides to
-     // stall/reversal, ×2 companion. NO per-symbol 5/8/12% thresholds. Do NOT re-tier these per coin.
-     {"btc_upjump","BTC",B1,H1,18,"UpJump2", 1.0,"BTC spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"eth_upjump","ETH",E1,H1,18,"UpJump2", 1.0,"ETH spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"sol_upjump","SOL",S1,H1,18,"UpJump2", 1.0,"SOL spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
+     // MAJORS RE-LOCKED S-2026-07-07 (backtest/rider_sweep_wf.py, walk-forward IS/OOS + plateau,
+     // real 23-25bp RT, run on BOTH the 9y Binance archive and the live 5.5y CSVs): the uniform
+     // 2%/24h trigger is NET NEGATIVE across the full history; the robust plateau is the BIG slow
+     // jump -- 48-bar window, BTC/ETH 4%, SOL 7% (per-coin thr reflects vol, mechanism identical).
+     // OOS nets: BTC +15.8k bp (9y) / +3.5-4k (5.5y), ETH +4.8-11.7k, SOL +1.6-2.3k. The alt legs
+     // below keep UpJump2 UNTESTED at the new definition -- re-sweep before promoting any of them.
+     {"btc_upjump","BTC",B1,H1,18,"UpJump4x48", 1.0,"BTC spot up-jump (companion parent, 0.20% RT)","UpJump 4%x48h 1h"},
+     {"eth_upjump","ETH",E1,H1,18,"UpJump4x48", 1.0,"ETH spot up-jump (companion parent, 0.20% RT)","UpJump 4%x48h 1h"},
+     {"sol_upjump","SOL",S1,H1,18,"UpJump7x48", 1.0,"SOL spot up-jump (companion parent, 0.20% RT)","UpJump 7%x48h 1h"},
      {"doge_upjump","DOGE",D("DOGE","1h"),H1,18,"UpJump2",1.0,"DOGE spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
      {"ada_upjump","ADA",D("ADA","1h"),H1,18,"UpJump2", 1.0,"ADA spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
      {"trx_upjump","TRX",D("TRX","1h"),H1,18,"UpJump2", 1.0,"TRX spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
@@ -313,11 +316,20 @@ int main() {
         double cum_usd = p.value("realized_usd", 0.0);
         auto cm = cmap[L.key]; double corr = cm.first, scale = cm.second;
         long qty = qty_for((t != 0 && epx > 0) ? epx : px, L.mult, scale);
+        // CONTRACTS/VT FREEZE (honest-accounting, S-2026-07-07): a real position holds the
+        // contracts it OPENED with; recomputing each run booked P&L on a phantom quantity.
+        double sz_book = sz;
+        if (pos0 != 0) {
+            if (p.contains("contracts") && p["contracts"].is_number() && p["contracts"].get<double>() > 0)
+                qty = (long)p["contracts"].get<double>();
+            if (p.contains("vt") && p["vt"].is_number() && p["vt"].get<double>() > 0)
+                sz_book = p["vt"].get<double>();
+        }
 
         if (t != pos0) {                            // ---- TRADE (flip) ----
             if (pos0 != 0 && epx > 0) {             // close old leg -> realized
-                long q0 = qty;
-                double r = (pos0 * (px - epx) / epx * sz - c * sz) * 100; cum += r; ntrades++;
+                long q0 = qty;                       // entry-frozen contracts (see freeze above)
+                double r = (pos0 * (px - epx) / epx * sz_book - c * sz_book) * 100; cum += r; ntrades++;
                 double r_usd = pos0 * (px - epx) * L.mult * q0
                                - (L.cost + 2) / 10000.0 * px * L.mult * q0; cum_usd += r_usd;
                 json ce = {
@@ -339,19 +351,20 @@ int main() {
             }
             if (t != 0) {
                 epx = px; ets = json(now); qty = qty_for(epx, L.mult, scale);
+                sz_book = sz;                        // fresh open: freeze THIS vt for the trade's life
                 led << now << "," << L.key << ",OPEN " << t << "," << t << ","
                     << fmt(px, 4) << ",," << fmt(cum, 3) << "\n";
                 ntrades++;
             }
         }
-        double unreal = (t != 0 && epx > 0) ? t * (px - epx) / epx * sz * 100 : 0.0;
+        double unreal = (t != 0 && epx > 0) ? t * (px - epx) / epx * sz_book * 100 : 0.0;
         double unreal_usd = (t != 0 && epx > 0) ? t * (px - epx) * L.mult * qty : 0.0;
         if (t != 0) deployed += px * L.mult * qty;
         tot_real += cum; tot_unreal += unreal; tot_real_usd += cum_usd; tot_unreal_usd += unreal_usd;
 
         json slot = {
             {"key", L.key}, {"sym", L.dsym}, {"strat", L.dstrat}, {"pos", t},
-            {"contracts", t ? qty : 0L}, {"vt", round_n(sz, 2)}, {"mult", L.mult}, {"pool", POOL},
+            {"contracts", t ? qty : 0L}, {"vt", round_n(t ? sz_book : sz, 2)}, {"mult", L.mult}, {"pool", POOL},
             {"tf_ms", L.tf_ms}, {"cost_bps", L.cost},
             {"corr", round_n(corr, 2)}, {"downsized", scale < 1.0 && t != 0},
             {"notional", t ? round_n(px * L.mult * qty, 0) : 0},
@@ -406,9 +419,10 @@ int main() {
         {"n_open", n_open_state}, {"killed", KILLED},
         {"slots", slots}, {"closed", closed}
     };
-    std::ofstream sf(STATE);
-    sf << out.dump(1);
-    sf.close();
+    // ATOMIC write (tmp+rename): stall_companion (crypto books) reads this file every cron
+    // cycle -- a partial read parsed as "no slots" mass-ENGINE_EXITs every open companion.
+    { std::ofstream sf(STATE + ".tmp"); sf << out.dump(1); }
+    std::rename((STATE + ".tmp").c_str(), STATE.c_str());
 
     std::printf("refresh-intraday: %d new trade-events, %d open, unreal $%.2f (%.2f%%) realized $%.2f (%.2f%%)\n",
                 ntrades, n_open_state, tot_unreal_usd, tot_unreal, tot_real_usd, tot_real);

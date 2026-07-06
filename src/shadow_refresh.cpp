@@ -140,7 +140,11 @@ int main() {
         } else if (!integ) {
             t = 0; sz = 1.0; px = 0.0; expx = 0.0;
         } else {
-            int rma = gated_strats().count(L.strat) ? regime_gate_ma() : 0;
+            // REGIME GATE: NDX (index) ONLY. Operator hard rule 2026-07-06
+            // (feedback-no-200dma-crypto): NO 200DMA anywhere in crypto -- the BTC/ETH/SOL
+            // trend legs run ungated, matching the intraday book + allocator + wave engine.
+            // The NDX TSMom50 gate (S-2026-06-30) is an index rule and stands.
+            int rma = (L.sym == "NDX" && gated_strats().count(L.strat)) ? regime_gate_ma() : 0;
             // vol-target size dial: 0.015 on the crypto trend/Regime legs, 0 (pool-only) on IBS/NDX.
             // See CryptoParentProtection audit -- the sole edge-preserving parent protection.
             double vt = vt_target_for(L.sym, L.strat);
@@ -193,6 +197,17 @@ int main() {
         double cum_usd = p.value("realized_usd", 0.0);
         auto cm = cmap[L.key]; double corr = cm.first, scale = cm.second;
         long qty = qty_for((t != 0 && epx > 0) ? epx : px, L.mult, scale, sz);
+        // CONTRACTS/VT FREEZE (honest-accounting, S-2026-07-07): a real position holds the
+        // contracts it OPENED with. Recomputing qty/vt each run (pool split, corr scale, and --
+        // on a close-to-flat -- today's px) booked realized P&L on a phantom time-varying
+        // quantity. While a position is held, carry the entry-frozen contracts + vt multiplier.
+        double sz_book = sz;
+        if (pos0 != 0) {
+            if (p.contains("contracts") && p["contracts"].is_number() && p["contracts"].get<double>() > 0)
+                qty = (long)p["contracts"].get<double>();
+            if (p.contains("vt") && p["vt"].is_number() && p["vt"].get<double>() > 0)
+                sz_book = p["vt"].get<double>();
+        }
 
         double peak_usd = (p.contains("peak_usd") && p["peak_usd"].is_number()) ? p["peak_usd"].get<double>() : 0.0;
         long   peak_ts  = (p.contains("peak_ts")  && p["peak_ts"].is_number())  ? p["peak_ts"].get<long>()    : 0;
@@ -246,8 +261,8 @@ int main() {
 
         if (t != pos0) {                            // ---- TRADE (flip) ----
             if (pos0 != 0 && epx > 0) {             // close old leg -> realized
-                long q0 = qty;
-                double r = (pos0 * (px - epx) / epx * sz - c * sz) * 100; cum += r; ntrades++;
+                long q0 = qty;                       // entry-frozen contracts (see freeze above)
+                double r = (pos0 * (px - epx) / epx * sz_book - c * sz_book) * 100; cum += r; ntrades++;
                 double r_usd = pos0 * (px - epx) * L.mult * q0
                                - (L.cost + 2) / 10000.0 * px * L.mult * q0; cum_usd += r_usd;
                 json ce = {
@@ -269,20 +284,21 @@ int main() {
             }
             if (t != 0) {
                 epx = px; ets = json(now); qty = qty_for(epx, L.mult, scale, sz);
+                sz_book = sz;                        // fresh open: freeze THIS vt for the trade's life
                 peak_usd = 0.0; peak_ts = unix_from(now); be_peak = 0.0;
                 led << now << "," << L.key << ",OPEN " << t << "," << t << ","
                     << fmt(px, 4) << ",," << fmt(cum, 3) << "\n";
                 ntrades++;
             }
         }
-        double unreal = (t != 0 && epx > 0) ? t * (px - epx) / epx * sz * 100 : 0.0;
+        double unreal = (t != 0 && epx > 0) ? t * (px - epx) / epx * sz_book * 100 : 0.0;
         double unreal_usd = (t != 0 && epx > 0) ? t * (px - epx) * L.mult * qty : 0.0;
         if (t != 0) deployed += px * L.mult * qty;
         tot_real += cum; tot_unreal += unreal; tot_real_usd += cum_usd; tot_unreal_usd += unreal_usd;
 
         json slot = {
             {"key", L.key}, {"sym", L.dsym}, {"strat", L.dstrat}, {"pos", t},
-            {"contracts", t ? qty : 0}, {"vt", round_n(sz, 2)}, {"mult", L.mult}, {"pool", POOL},
+            {"contracts", t ? qty : 0}, {"vt", round_n(t ? sz_book : sz, 2)}, {"mult", L.mult}, {"pool", POOL},
             {"corr", round_n(corr, 2)}, {"downsized", scale < 1.0 && t != 0},
             {"notional", t ? round_n(px * L.mult * qty, 0) : 0},
             {"px", round_n(px, 2)}, {"entry_px", round_n(epx, 2)}, {"entry_ts", ets},
@@ -345,9 +361,10 @@ int main() {
         {"ndx_mark_src", have_live_ndx ? "IBKR-NQ" : "daily-close"},
         {"clipped", clipped_json}, {"slots", slots}, {"closed", closed}
     };
-    std::ofstream sf(STATE);
-    sf << out.dump(1);
-    sf.close();
+    // ATOMIC write (tmp+rename): stall_companion / live_mark / the GUI read this file --
+    // a partial read parsed as "no slots" mass-ENGINE_EXITs every open companion.
+    { std::ofstream sf(STATE + ".tmp"); sf << out.dump(1); }
+    std::rename((STATE + ".tmp").c_str(), STATE.c_str());
 
     std::printf("refresh: %d new trade-events, open unreal $%.2f (%.2f%%) realized $%.2f\n",
                 ntrades, tot_unreal_usd, tot_unreal, tot_real_usd);
