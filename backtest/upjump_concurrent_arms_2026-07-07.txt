@@ -1,0 +1,28 @@
+CONCURRENT UPJUMP ARMS SWEEP (S-2026-07-07, operator item 5)
+NO-FLOOR tiered ladder family (roster_cfg.csv tiers, recovered
+crypto_upjump_tiered_ladder_sweep.py mechanism), real fills H1-close, RT 20bp,
+8 coins, per-coin all-6 gate. Question: do MORE concurrent arms per move add?
+
+ROSTER SUMS (8 coins), net = % of per-leg notional (more legs = more notional deployed):
+  2tier cap2             n=  3582 net=  +5043% H1= +2936 H2= +2107 bear= +3200 pass=7/8 (BTC bear -4)
+  2tier cap5 (roster)    n=  5477 net= +10283% H1= +6023 H2= +4260 bear= +6598 pass=8/8
+  2tier cap8             n=  6237 net= +12526% H1= +6839 H2= +5688 bear= +7616 pass=7/8 (ADA H1 -102)
+  2tier cap10            n=  6519 net= +14151% H1= +7357 H2= +6793 bear= +8268 pass=7/8 (ADA H1 -157)
+  stack246 cap5          n=  6168 net= +10062% H1= +5694 H2= +4368 bear= +5578 pass=7/8 (TRX bear -64)
+  stack246 cap8          n=  7317 net= +13140% H1= +7456 H2= +5684 bear= +7245 pass=7/8 (TRX bear -77)
+  roster+stack246 cap8   n= 10895 net= +18360% H1=+10795 H2= +7565 bear=+11288 pass=8/8  <-- WINNER
+  roster+stack246 cap8 2xCOST(40bp): net=+16098% H1=+9676 H2=+6422 bear=+9768 pass=7/8 (BTC bear -12, marginal)
+
+VERDICTS
+1. YES — multiple concurrent arms are additive. Winner = 5 BASE tiers (roster tight+wide
+   + stacked arms +2/+4/+6% g50 rev-only) + self-funding ladder cap 8: +18,360% vs
+   roster's +10,283%, 8/8 coins all-6, 2x-cost robust (BTC bear -12 the only marginal).
+2. Pure cap raises on 2 tiers (cap8/10) BREAK ADA (H1 negative) — late self-funded
+   spawns buy ADA tops. Stacked BASE arms scale better than deeper ladders.
+3. Correlated-stacking caveat: legs on the same move share the parent reversal; more
+   legs = more notional in ONE move (leverage-not-alpha applies past x2 per 07-05e).
+   PF stays flat (1.2-5.8 per coin) — stacking scales capital deployed, not per-$ edge.
+4. NOTE: this family is the NO-FLOOR ladder (the 07-05 roster spec), NOT the live
+   BE-floor book — the floor family is real-fill dead (see backtest/latearm/).
+Runner: inline (see session S-2026-07-07v); base module = recovered
+crypto_upjump_tiered_ladder_sweep.py (git df71919, purged 6979cf5).
