@@ -16,6 +16,7 @@ backtest/ibkrcrypto_bt.bak.*
 # --- runtime book state (regenerated every cron cycle) — NOT source ---
 backtest/data/ibkrcrypto/
 backtest/data/ibkrcrypto_intraday/
+backtest/data/ibkrcrypto_ab_gate/
 backtest/data/ibkrcrypto_luke/
 # companion runtime state (rewritten every minute); ledgers (*_closed.csv) ARE tracked
 companion_intraday/companion_state.json

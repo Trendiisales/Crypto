@@ -116,9 +116,26 @@ static std::vector<ILeg> intraday_roster() {
     };
 }
 
-// REGIME GATE — REMOVED 2026-07-06 (operator hard rule, feedback-no-200dma-crypto: NO 200DMA
-// anywhere in crypto). The former ETH-only 200-day gate on EMAx/TSMom50/Ichi is gone; legs run
-// ungated (REGIME_MA=0 to the bt binary). Do NOT re-add a 200DMA/200MA regime gate here.
+// REGIME GATE — LIVE BOOK IS UNGATED (feedback-no-200dma-crypto). rma=0 by default, so the
+// live intraday ledger is byte-identical to the ungated book. The 2026-07-06 blanket ban stands
+// for the LIVE path.
+//
+// SHADOW A/B (S-2026-07-10, ablation-backed) — the blanket "NO 200DMA" ban is being tested for a
+// NARROW, operator-authorised exception ("show me real value in trades", 2026-07-10). The DD-
+// attribution ablation (backtest/ibkrcrypto_bt --protect-sweep, gate OFF vs REGIME_MA=200) showed
+// a per-symbol close>SMA200 gate BEATS vol-target on the high-vol trend legs (ETH/SOL EMAx/TSMom:
+// net-preserving DD cut where vt crushes net) and is the ONLY tool that fully avoids bear-regime
+// longs (2022 pruned to zero). BTC-TSMom is EXCLUDED (vt wins there). Companions/UpJump are
+// EXCLUDED (a gate there only sits in cash — the original ban rationale).
+//
+// This is a SHADOW A/B ONLY: gated iff env AB_GATE_TREND is set (=200), and ONLY when run with a
+// separate IBKRCRYPTO_DATADIR so the LIVE ledger + stall_companion + GUI are never touched. Do NOT
+// flip the live book to gated without forward A/B evidence + explicit operator sign-off.
+static bool ab_gate_leg(const ILeg& L) {
+    if (L.key.find("upjump") != std::string::npos) return false;   // companions NEVER gated
+    if (L.sym != "ETH" && L.sym != "SOL")          return false;   // BTC: vt wins, no gate
+    return true;                                                    // remaining ETH/SOL legs are trend legs
+}
 
 // FRESHNESS GUARD: tf-scaled. 4h -> ~14h, 1h -> ~5.4h.
 static double max_age_days_tf(long tf_ms) { return (tf_ms / 86400000.0) * 3.0 + 0.1; }
@@ -131,10 +148,12 @@ static IFresh fresh_ok_tf(const std::string& path, long tf_ms) {
 
 // ibkrcrypto_bt --signal with the intraday BT_TF_MS env added (mirrors signal()).
 static Sig run_signal_tf(const std::string& sym, const std::string& csvf, int cost,
-                         const std::string& strat, long rma, long tf_ms) {
+                         const std::string& strat, long rma, long tf_ms,
+                         const std::string& vttgt = "") {
     std::string cmd = cost_env_prefix(sym)
         + "COSTBPS=" + std::to_string(cost) + " BT_TF_MS=" + std::to_string(tf_ms)
-        + " REGIME_MA=" + std::to_string(rma) + " "
+        + " REGIME_MA=" + std::to_string(rma)
+        + (vttgt.empty() ? std::string() : " VTTGT=" + vttgt) + " "
         + "'" + bt_bin() + "' " + sym + " '" + csvf + "' --signal " + strat + " 2>/dev/null";
     std::string out = run_capture(cmd);
     std::stringstream ss(out); std::string ln;
@@ -275,8 +294,22 @@ int main() {
         } else if (!integ) {
             t = 0; sz = 1.0; px = 0.0; expx = 0.0;
         } else {
-            long rma = 0;   // 200d regime gate REMOVED 2026-07-06 (feedback-no-200dma-crypto)
-            Sig s = run_signal_tf(L.sym, L.csvf, L.cost, L.strat, rma, L.tf_ms);
+            // LIVE: rma=0 (ungated). SHADOW A/B: if AB_GATE_TREND set AND this is an ETH/SOL
+            // trend leg, gate on per-symbol close>SMA(rma) + vt OFF (the ablation-winning config).
+            // Guarded so the live book (env unset) is byte-identical. See ab_gate_leg + header note.
+            long rma = 0; std::string vtenv;
+            if (const char* g = getenv("AB_GATE_TREND"); g && *g && ab_gate_leg(L)) {
+                // AB_GATE_TREND is the MA length in *DAYS* (200 = the ablation-validated 200-day gate).
+                // The BT computes SMA on the leg's OWN bars, so convert days->bars via bars-per-day
+                // (4h leg -> 200*6=1200 bars, 1h leg -> 200*24=4800 bars) to reproduce a true 200-DAY
+                // regime SMA on intraday data. A bare 200 here would be a 200-BAR (~33d/~8d) gate — a
+                // DIFFERENT, unvalidated gate. bpd from tf_ms keeps every leg's gate at the same
+                // calendar lookback the daily ablation used.
+                long bpd = 86400000L / L.tf_ms;      // bars/day for this leg's timeframe
+                rma = atol(g) * bpd;                 // MA length in the leg's own bars
+                vtenv = "0";                         // vt OFF: gate replaces vol-target on the high-vol leg
+            }
+            Sig s = run_signal_tf(L.sym, L.csvf, L.cost, L.strat, rma, L.tf_ms, vtenv);
             t = s.t; sz = s.sz; px = s.px; expx = s.expx;
         }
         legs.push_back({L, fr.ok, integ, fr.ok && integ,
@@ -409,7 +442,7 @@ int main() {
                         {"stale_sources", stale_sources}, {"sources", sources}};
 
     json out = {
-        {"engine", "IBKRCrypto-Intraday"}, {"mode", "SHADOW"}, {"updated", now + " UTC"},
+        {"engine", env_or("ENGINE_TAG", "IBKRCrypto-Intraday")}, {"mode", "SHADOW"}, {"updated", now + " UTC"},
         {"data_health", data_health},
         {"open_unreal_pct", round_n(tot_unreal, 2)}, {"realized_pct", round_n(tot_real, 2)},
         {"total_pct", round_n(tot_unreal + tot_real, 2)},
