@@ -574,7 +574,10 @@ int main(int argc,char**argv){
         // live --signal path, regardless of the strat's allow_short/"PERP UNLOCK" default.
         // A down-cross => flat (0), not short. Applies to every shadow leg (daily+intraday).
         if(t<0){ t=0; ex=0.0; }
-        std::printf("%s %s target=%d size=%.2f px=%.2f exit=%.2f\n",
+        // px/exit at %.6f: %.2f quantized sub-$1 coins (OP 0.1056->"0.11",
+        // 0.1017->"0.10") -- doubled the booked loss on the 2026-07-12 OP close
+        // and corrupted every sub-$1 entry_px written from this line.
+        std::printf("%s %s target=%d size=%.2f px=%.6f exit=%.6f\n",
             s.sym.c_str(), st.c_str(), t, vtsz(N-1), s.c[N-1], ex);
         return 0;
     }
