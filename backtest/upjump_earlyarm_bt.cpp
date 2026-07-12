@@ -763,7 +763,9 @@ int main(int argc, char** argv) {
         std::printf("%-5s %2s %5s %5s | %5s %5s | %6s %8s %6s %8s %8s %8s %8s %+8s %5s\n",
             "coin", "W", "thr", "brk", "trig", "skip", "n", "net%", "PF", "H1", "H2", "2xcost", "ddbp", "y22", "gate");
         struct TC { std::string coin; int W; };
-        std::vector<TC> tcs = { {"BTC",2},{"ETH",1},{"SOL",1},{"BNB",1},{"DOGE",4},{"ADA",1},{"XRP",1},{"TRX",1} };
+        std::vector<TC> tcs = { {"BTC",2},{"ETH",1},{"SOL",1},{"BNB",1},{"DOGE",4},{"ADA",1},{"XRP",1},{"TRX",1},
+            // S-2026-07-13 operator: run the SAME low-thr study on ALL traded crypto, not just the 8 grid coins.
+            {"NEAR",1},{"AVAX",1},{"LINK",1},{"BCH",2},{"UNI",1},{"OP",1},{"XLM",1},{"GRT",1},{"AAVE",1} };
         std::vector<double> arms = {0.2, 2, 3, 4, 6, 8};
         for (auto& tc : tcs) {
             if (!B.count(tc.coin)) B[tc.coin] = load(tc.coin);
