@@ -70,8 +70,24 @@ inline std::vector<Leg> roster() {
     const std::string B = csv_dir() + "/BTCUSDT_1d.csv";
     const std::string E = csv_dir() + "/ETHUSDT_1d.csv";
     const std::string S = csv_dir() + "/SOLUSDT_1d.csv";
+    const std::string ADA  = csv_dir() + "/ADAUSDT_1d.csv";
+    const std::string AAVE = csv_dir() + "/AAVEUSDT_1d.csv";
     const std::string N = ndx_csv();
     return {
+        // S-2026-07-12 DAILY MIMIC replacements for the culled 1h UpJump2 alt legs.
+        // The 1h up-jump was the WRONG TIMEFRAME for these coins (all engines net-neg on
+        // 1h OOS); on DAILY they are strongly viable. Faithful --protect-sweep, live vt +
+        // regime_ma=0 (NO 200DMA -- crypto hard rule), gate net+ & PF>=1.3 on OOS_23-26,
+        // 2x-cost-checked. ADVERSE-PROTECTION: vol-target (0.015) size-down on Kelt/Regime
+        // (edge-preserving, the crypto parent protection); UpJump pool-only flip/selectivity.
+        // A cold loss-cut LOWERS net (backtested) -> no floor by design.
+        // ADA: Kelt OOS +77/PF4.60 DD6.6% ; Regime OOS +46/PF1.67 DD18% (2x-cost robust).
+        // AAVE: Kelt OOS +13/PF1.56 DD11.5% ; UpJump4x48 OOS +94/PF1.70 DD62% (higher DD).
+        // OP: NOT replaced -- dead on every engine + no daily data (genuinely non-viable).
+        {"ada_kelt",   "ADA",  ADA,  18, "Kelt",       2500.0, "ADA (spot, daily mimic)", "Trend (Keltner)"},
+        {"ada_reg",    "ADA",  ADA,  18, "Regime",     2500.0, "ADA (spot, daily mimic)", "Regime-switch"},
+        {"aave_kelt",  "AAVE", AAVE, 18, "Kelt",          4.0, "AAVE (spot, daily mimic)","Trend (Keltner)"},
+        {"aave_ujd",   "AAVE", AAVE, 18, "UpJump4x48",    4.0, "AAVE (spot, daily mimic)","UpJump 4%x48h D1"},
         {"eth_emax",  "ETH", E, 28, "EMAx",    0.20, "ETH Spot-Quoted (QEF)",   "Trend (EMAx)"},
         {"eth_kelt",  "ETH", E, 28, "Kelt",    0.20, "ETH Spot-Quoted (QEF)",   "Trend (Keltner)"},
         {"btc_emax",  "BTC", B, 14, "EMAx",    0.01, "BTC Spot-Quoted (QTF)",   "Trend (EMAx)"},
