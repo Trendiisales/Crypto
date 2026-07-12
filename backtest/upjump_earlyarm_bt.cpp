@@ -809,6 +809,67 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+
+    if (mode == "corrgate") {
+        // CH-03 CORRELATION-GATE BACKTEST (audit 2026-07-13). Question: does suppressing an
+        // alt up-jump entry WHEN BTC is in a hard 24h move (|btc24h|>THR) AND the alt is moving
+        // the same direction >50% of BTC's magnitude — the live gate's exact rule — IMPROVE the
+        // book? Faithful: same live-header BE-cascade stagger book, same 20bp RT. For each coin
+        // we run the book on ALL up-jump windows vs windows MINUS the suppressed set, and compare.
+        // Enable the gate ONLY if suppression is a net improvement.
+        const double BTC_THR = getenv("CG_BTC") ? atof(getenv("CG_BTC")) : 0.05;  // BTC 24h move
+        std::printf("CORR-GATE BT — suppress alt up-jump when |BTC 24h|>%.0f%% & alt same-dir >50%% of BTC. 20bp RT.\n", BTC_THR*100);
+        std::printf("%-5s %2s %5s | %6s %8s %6s | %6s %8s %6s | %8s %6s %6s\n",
+            "coin","W","thr","nAll","netAll%","pfAll","nKeep","netKeep%","pfKeep","suppr_n","suppr%","verdict");
+        // BTC 1h series -> ts(ms) -> close, for 24h lookback (24 bars).
+        if (!B.count("BTC")) B["BTC"] = load("BTC");
+        const Bars& btc = B["BTC"];
+        std::map<int64_t,double> btc_close; for (int i=0;i<btc.N;i++) btc_close[btc.ts[i]]=btc.c[i];
+        auto btc_24h = [&](int64_t ts_ms)->double{
+            int64_t prev = ts_ms - 24LL*3600*1000;
+            auto a=btc_close.find(ts_ms), p=btc_close.find(prev);
+            if (a==btc_close.end()||p==btc_close.end()||p->second<=0) return 0.0;
+            return a->second/p->second - 1.0;
+        };
+        struct TC { std::string coin; int W; };
+        std::vector<TC> tcs={{"ETH",1},{"SOL",1},{"BNB",1},{"DOGE",4},{"ADA",1},{"XRP",1},{"TRX",1}};
+        std::vector<double> arms={0.2,2,3,4,6,8};
+        for (auto& tc:tcs){
+            if(!B.count(tc.coin))B[tc.coin]=load(tc.coin);
+            const Bars& b=B[tc.coin]; if(!b.N)continue;
+            for(double thr:{0.02,0.03}){
+                auto all=parent(b,tc.W,thr);
+                if(all.size()<8)continue;
+                // split: suppressed if BTC 24h hot AND alt same-dir >50% of BTC at entry
+                std::vector<Window> keep; int suppr=0;
+                for(auto& w:all){
+                    int64_t ets=b.ts[w.ei];
+                    double bm=btc_24h(ets);
+                    // alt 24h return at entry
+                    int ai=w.ei; int pj=ai; while(pj>0 && b.ts[ai]-b.ts[pj]<24LL*3600*1000) pj--;
+                    double am=(pj>=0&&b.c[pj]>0)? b.c[ai]/b.c[pj]-1.0 : 0.0;
+                    bool hot = std::fabs(bm)>BTC_THR && ((bm>0&&am>bm*0.5)||(bm<0&&am<bm*0.5));
+                    if(hot) suppr++; else keep.push_back(w);
+                }
+                auto rowsA=engine_book_stagger(b,all,arms,1,0,20.0);
+                double n2xA=book_net(engine_book_stagger(b,all,arms,1,0,40.0));
+                Met mA=metrics(rowsA,all,b,n2xA);
+                double netK=0,pfK=0; int nK=0;
+                if(keep.size()>=5){
+                    auto rowsK=engine_book_stagger(b,keep,arms,1,0,20.0);
+                    double n2xK=book_net(engine_book_stagger(b,keep,arms,1,0,40.0));
+                    Met mK=metrics(rowsK,keep,b,n2xK); netK=mK.net; pfK=mK.pf; nK=mK.n;
+                }
+                const char* verdict = (keep.size()>=5 && pfK>mA.pf && netK>mA.net*0.7) ? "GATE+" :
+                                      (suppr==0) ? "n/a(0supp)" : "GATE-";
+                std::printf("%-5s %2d %4.0f%% | %6zu %+8.0f %6.2f | %6zu %+8.0f %6.2f | %8d %5.0f%% %6s\n",
+                    tc.coin.c_str(),tc.W,thr*100, all.size(),mA.net,mA.pf,
+                    keep.size(),netK,pfK, suppr, all.size()?100.0*suppr/all.size():0, verdict);
+            }
+        }
+        return 0;
+    }
+
     std::fprintf(stderr, "unknown mode %s\n", mode.c_str());
     return 1;
 }
