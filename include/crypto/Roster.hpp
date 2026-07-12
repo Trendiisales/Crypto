@@ -82,12 +82,14 @@ inline std::vector<Leg> roster() {
         // (edge-preserving, the crypto parent protection); UpJump pool-only flip/selectivity.
         // A cold loss-cut LOWERS net (backtested) -> no floor by design.
         // ADA: Kelt OOS +77/PF4.60 DD6.6% ; Regime OOS +46/PF1.67 DD18% (2x-cost robust).
-        // AAVE: Kelt OOS +13/PF1.56 DD11.5% ; UpJump4x48 OOS +94/PF1.70 DD62% (higher DD).
+        // AAVE: Kelt OOS +13/PF1.56 DD11.5% -- the ONLY viable AAVE mimic. UpJump4x48 was
+        //   rejected (operator hard-no: 62% DD); with the 200DMA gate no other engine
+        //   clears OOS PF>=1.3 (TSMom50 1.16, Roc 0.76, EMAx neg) -> AAVE = Kelt ONLY, no
+        //   upjump, no curve-fit 2nd engine.
         // OP: NOT replaced -- dead on every engine + no daily data (genuinely non-viable).
         {"ada_kelt",   "ADA",  ADA,  18, "Kelt",       2500.0, "ADA (spot, daily mimic)", "Trend (Keltner)"},
         {"ada_reg",    "ADA",  ADA,  18, "Regime",     2500.0, "ADA (spot, daily mimic)", "Regime-switch"},
         {"aave_kelt",  "AAVE", AAVE, 18, "Kelt",          4.0, "AAVE (spot, daily mimic)","Trend (Keltner)"},
-        {"aave_ujd",   "AAVE", AAVE, 18, "UpJump4x48",    4.0, "AAVE (spot, daily mimic)","UpJump 4%x48h D1"},
         {"eth_emax",  "ETH", E, 28, "EMAx",    0.20, "ETH Spot-Quoted (QEF)",   "Trend (EMAx)"},
         {"eth_kelt",  "ETH", E, 28, "Kelt",    0.20, "ETH Spot-Quoted (QEF)",   "Trend (Keltner)"},
         {"btc_emax",  "BTC", B, 14, "EMAx",    0.01, "BTC Spot-Quoted (QTF)",   "Trend (EMAx)"},
