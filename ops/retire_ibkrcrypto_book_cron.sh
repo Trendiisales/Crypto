@@ -25,7 +25,9 @@ import subprocess, sys
 tag = sys.argv[1]
 cur = subprocess.run(["crontab","-l"], capture_output=True, text=True).stdout.splitlines()
 # match ACTIVE (non-comment) lines that RUN the Mac ibkrcrypto book binaries
-needles = ("/Users/jo/Crypto/build/shadow_refresh", "/Users/jo/Crypto/build/live_mark")
+needles = ("/Users/jo/Crypto/build/shadow_refresh", "/Users/jo/Crypto/build/live_mark",
+           "staleness_alarm.py",       # monitors the now-dead ibkrcrypto book -> would false-alarm
+           "run_ab_gate_shadow.sh")    # the A/B variant of the retired book
 out, n = [], 0
 for ln in cur:
     s = ln.lstrip()
