@@ -749,6 +749,66 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+
+    if (mode == "thrfloor") {
+        // THRESHOLD-FLOOR STUDY (S-2026-07-13, operator): how LOW can each coin's up-jump
+        // trigger go before chop eats it — and does a BRACKET CONFIRM (enter only after price
+        // pushes +b% ABOVE the trigger close within TTL bars) keep low thresholds out of chop?
+        // Long-only spot, BE-N6 cascade via the REAL live header, 20bp RT, 2x = full re-sim.
+        // Gate (crypto rule): net+ && PF>=1.3 && both WF halves+ && 2x+ ; y2022 SHOWN not gated.
+        double bo = getenv("TF_BRK") ? atof(getenv("TF_BRK")) : 0.0;   // confirm offset (0 = off)
+        int cttl  = getenv("TF_TTL") ? atoi(getenv("TF_TTL")) : 12;
+        std::printf("THR-FLOOR — BE-cascade mimic, %s, RT 20bp\n",
+                    bo > 0 ? "BRACKET-CONFIRM on" : "plain trigger");
+        std::printf("%-5s %2s %5s %5s | %5s %5s | %6s %8s %6s %8s %8s %8s %8s %+8s %5s\n",
+            "coin", "W", "thr", "brk", "trig", "skip", "n", "net%", "PF", "H1", "H2", "2xcost", "ddbp", "y22", "gate");
+        struct TC { std::string coin; int W; };
+        std::vector<TC> tcs = { {"BTC",2},{"ETH",1},{"SOL",1},{"BNB",1},{"DOGE",4},{"ADA",1},{"XRP",1},{"TRX",1} };
+        std::vector<double> arms = {0.2, 2, 3, 4, 6, 8};
+        for (auto& tc : tcs) {
+            if (!B.count(tc.coin)) B[tc.coin] = load(tc.coin);
+            const Bars& b = B[tc.coin]; if (!b.N) continue;
+            for (double thr : {0.005, 0.0075, 0.01, 0.015, 0.02, 0.03}) {
+                std::vector<Window> ws; int ntrig = 0, nskip = 0;
+                if (bo <= 0) {
+                    ws = parent(b, tc.W, thr);
+                    ntrig = (int)ws.size();
+                } else {
+                    // bracket-confirm: trigger -> pend buy-stop at c*(1+bo), TTL bars; unfilled = chop-skipped
+                    bool pos = false; int i0 = tc.W;
+                    for (int i = i0; i < b.N - 2; i++) {
+                        double j = b.c[i] / b.c[i - tc.W] - 1.0;
+                        if (!pos && j >= thr) {
+                            ntrig++;
+                            double lvl = b.c[i] * (1.0 + bo); int ei = -1;
+                            for (int k = i + 1; k <= std::min(i + cttl, b.N - 2); k++)
+                                if (b.c[k] >= lvl) { ei = k + 1; break; }
+                            if (ei < 0) { nskip++; continue; }
+                            pos = true;
+                            int x = -1;
+                            for (int k = ei; k < b.N - 1; k++) {
+                                double jx = b.c[k] / b.c[k - tc.W] - 1.0;
+                                if (jx <= -thr) { x = k + 1; break; }
+                            }
+                            if (x < 0) x = b.N - 1;
+                            ws.push_back({ei, x, b.o[ei], j});
+                            i = x; pos = false;
+                        }
+                    }
+                }
+                if (ws.size() < 5) { std::printf("%-5s %2d %4.2f%% %4.1f | (too few windows: %zu)\n", tc.coin.c_str(), tc.W, thr*100, bo*100, ws.size()); continue; }
+                auto rows = engine_book_stagger(b, ws, arms, 1, 0, 20.0);
+                double n2x = book_net(engine_book_stagger(b, ws, arms, 1, 0, 40.0));
+                Met m = metrics(rows, ws, b, n2x);
+                bool gate = (m.net > 0) && (m.pf >= 1.3) && (m.h1 > 0) && (m.h2 > 0) && (n2x > 0);
+                std::printf("%-5s %2d %4.2f%% %4.1f | %5d %5d | %6d %+8.0f %6.2f %+8.0f %+8.0f %+8.0f %8.0f %+8.0f %5s\n",
+                    tc.coin.c_str(), tc.W, thr*100, bo*100, ntrig, nskip,
+                    m.n, m.net, m.pf, m.h1, m.h2, n2x, m.maxdd_bp, m.y2022, gate ? "PASS" : "-");
+            }
+        }
+        return 0;
+    }
+
     std::fprintf(stderr, "unknown mode %s\n", mode.c_str());
     return 1;
 }
