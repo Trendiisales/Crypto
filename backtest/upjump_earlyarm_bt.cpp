@@ -872,6 +872,58 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+
+    if (mode == "befloor") {
+        // BE-FLOOR vs NO-FLOOR real-column test (operator 2026-07-13, after UNI-UJH -146bp).
+        // The live grid/UJH cells are NO-FLOOR (T1 live from entry -> cold losses). The operator's
+        // spec: only trade AFTER BE (be_floor: leg FLAT until +be_bp, floored stop -> can't book
+        // a cold loss). Config = validated 35266b6 (be_floor=true, be_bp=20, tight trail 20 / wide
+        // 150). Faithful: REAL live header, self-detect, REAL column (net_bp_real) — never the
+        // clamped model column. Decisive metric: # NEGATIVE clips (must be ~0 for be_floor).
+        std::printf("BEFLOOR vs NOFLOOR — REAL column (net_bp_real), self-detect, per coin\n");
+        std::printf("%-5s %2s %5s | %8s %6s %6s %6s | %8s %6s %6s %6s\n",
+            "coin","W","thr","NF_net%","NF_PF","NF_n","NF_neg","BF_net%","BF_PF","BF_n","BF_neg");
+        struct TC { std::string coin; int W; };
+        std::vector<TC> tcs = { {"BTC",2},{"ETH",1},{"SOL",1},{"BNB",1},{"DOGE",4},{"ADA",1},{"XRP",1},{"TRX",1},
+            {"NEAR",1},{"AVAX",1},{"LINK",1},{"BCH",2},{"UNI",1},{"OP",1},{"XLM",1},{"GRT",1},{"AAVE",1} };
+        std::vector<double> arms = {0.2, 2, 3, 4, 6, 8};
+        auto run_cell = [&](const Bars& b, int W, double thr, bool be_floor,
+                            double& net, double& pf, int& n, int& nneg){
+            std::vector<double> nets;
+            if (!be_floor) {
+                auto ws = parent(b, W, thr);
+                auto rows = engine_book_stagger(b, ws, arms, 1, 0, 20.0);
+                for (auto& r : rows) nets.push_back(r.net_bp);
+            } else {
+                UpJumpLadderCompanion::Config c;
+                c.parent_tag="BT"; c.tag="BF"; c.symbol="bt";
+                c.tight = {0,0,0,20.0}; c.wide = {0,0,0,150.0};   // trail_bp only (be_floor)
+                c.be_floor = true; c.be_bp = 20.0;
+                c.det_w = W; c.det_thr = thr; c.tf_secs = 3600; c.round_trip_bp = 20.0;
+                c.reclip_pct = 0.0; c.cap = 8;
+                UpJumpLadderCompanion eng(c);
+                eng.set_on_clip([&](const UpJumpLadderCompanion::ClipRecord& rec){ nets.push_back(rec.net_bp_real); });
+                for (int i=0;i<b.N;i++) eng.observe(true, 0.0, b.c[i], (int64_t)i*TF_MS);
+                eng.observe(false, 0.0, b.N? b.c[b.N-1]:0.0, (int64_t)(b.N?b.N-1:0)*TF_MS);
+            }
+            double gw=0,gl=0; net=0; n=(int)nets.size(); nneg=0;
+            for (double v: nets){ net += v/100.0; if(v>0)gw+=v; else {gl-=v; if(v<0)nneg++;} }
+            pf = gl>0? gw/gl : (gw>0?999:0);
+        };
+        for (auto& tc: tcs){
+            if(!B.count(tc.coin))B[tc.coin]=load(tc.coin);
+            const Bars& b=B[tc.coin]; if(!b.N)continue;
+            for (double thr : {0.005, 0.02}) {
+                double nfn,nfp,bfn,bfp; int nfN,nfNeg,bfN,bfNeg;
+                run_cell(b,tc.W,thr,false,nfn,nfp,nfN,nfNeg);
+                run_cell(b,tc.W,thr,true, bfn,bfp,bfN,bfNeg);
+                std::printf("%-5s %2d %4.1f%% | %+8.0f %6.2f %6d %6d | %+8.0f %6.2f %6d %6d\n",
+                    tc.coin.c_str(),tc.W,thr*100, nfn,nfp,nfN,nfNeg, bfn,bfp,bfN,bfNeg);
+            }
+        }
+        return 0;
+    }
+
     std::fprintf(stderr, "unknown mode %s\n", mode.c_str());
     return 1;
 }
