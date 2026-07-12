@@ -106,13 +106,19 @@ static std::vector<ILeg> intraday_roster() {
      {"btc_upjump","BTC",B1,H1,18,"UpJump4x48", 1.0,"BTC spot up-jump (companion parent, 0.20% RT)","UpJump 4%x48h 1h"},
      {"eth_upjump","ETH",E1,H1,18,"UpJump4x48", 1.0,"ETH spot up-jump (companion parent, 0.20% RT)","UpJump 4%x48h 1h"},
      {"sol_upjump","SOL",S1,H1,18,"UpJump7x48", 1.0,"SOL spot up-jump (companion parent, 0.20% RT)","UpJump 7%x48h 1h"},
-     {"doge_upjump","DOGE",D("DOGE","1h"),H1,18,"UpJump2",1.0,"DOGE spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"ada_upjump","ADA",D("ADA","1h"),H1,18,"UpJump2", 1.0,"ADA spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"trx_upjump","TRX",D("TRX","1h"),H1,18,"UpJump2", 1.0,"TRX spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"aave_upjump","AAVE",D("AAVE","1h"),H1,18,"UpJump2",1.0,"AAVE spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"near_upjump","NEAR",D("NEAR","1h"),H1,18,"UpJump2",1.0,"NEAR spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"bnb_upjump","BNB",D("BNB","1h"),H1,18,"UpJump2",1.0,"BNB spot up-jump (companion parent, 0.20% RT)","UpJump 2% 1h"},
-     {"op_upjump","OP",D("OP","1h"),H1,18,"UpJump2",1.0,"OP spot up-jump (parent-only, no companion)","UpJump 2% 1h"},
+     // S-2026-07-12 UpJump viability audit (faithful --protect-sweep, 1h, 20bp RT, gate =
+     // net+ & PF>=1.3 on OOS_23-26 fair long-only window, 2x-cost-checked). The 2%/24h
+     // "UpJump2" config was a LOSER on every alt (OP FULL -264/OOS -343, ADA/AAVE negative,
+     // DOGE/BNB/NEAR failed OOS). A loss-cut mimic does NOT rescue it (tested hs=0.05..0.30 ->
+     // worse/unchanged: the loss is the wrong signal firing, not a deep tail). The BIG-slow-jump
+     // config (4%/48h, 7%/48h) that already passes on majors DOES pass on the alts -> migrated.
+     // CULLED (fail gate on EVERY config): op_upjump (dead all), ada_upjump (OOS PF 1.27),
+     // aave_upjump (OOS PF 1.17). ADVERSE-PROTECTION: flip/selectivity-only -- a cold loss-cut
+     // LOWERS net (backtested S-2026-07-12, hs sweep), so no floor is added by design.
+     {"doge_upjump","DOGE",D("DOGE","1h"),H1,18,"UpJump7x48",1.0,"DOGE spot up-jump (companion parent, 0.20% RT)","UpJump 7%x48h 1h"},
+     {"trx_upjump","TRX",D("TRX","1h"),H1,18,"UpJump4x48", 1.0,"TRX spot up-jump (companion parent, 0.20% RT)","UpJump 4%x48h 1h"},
+     {"near_upjump","NEAR",D("NEAR","1h"),H1,18,"UpJump4x48",1.0,"NEAR spot up-jump (companion parent, 0.20% RT)","UpJump 4%x48h 1h"},
+     {"bnb_upjump","BNB",D("BNB","1h"),H1,18,"UpJump7x48",1.0,"BNB spot up-jump (companion parent, 0.20% RT)","UpJump 7%x48h 1h"},
     };
 }
 

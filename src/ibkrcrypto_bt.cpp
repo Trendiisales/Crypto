@@ -464,7 +464,9 @@ int main(int argc,char**argv){
             {"FULL",      1483228800000LL,1799999999000LL},
         };
         const double VTS[] = {0.0, 0.015, 0.02, 0.025};
-        const double HSS[] = {0.0, 0.20, 0.25, 0.30};
+        // S-2026-07-12 mimic-rescue test: add TIGHT loss-cuts (0.05-0.15) — a mimic
+        // drawdown-cancel can afford a cut a real fill can't. Does it flip the dead alt legs?
+        const double HSS[] = {0.0, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30};
         auto run=[&](auto strat){
             std::printf("=== [%s] %s protect-sweep (cost=%.1fbps RT, LONG-ONLY) ===\n",
                 s.sym.c_str(), st.c_str(), cfg.cost_bps+2*cfg.half_spread_bps);
@@ -487,6 +489,7 @@ int main(int argc,char**argv){
         else if(st=="TSMom50")run(TSMom(50));
         else if(st=="RSIrev") run(RSIrev(14,30,70));
         else if(st=="Roc")    run(Roc(20,0.0));
+        else if(st.rfind("UpJump",0)==0) run(UpJump::parse(st));  // S-2026-07-12: upjump viability/cull audit
         else { std::fprintf(stderr,"unknown strat %s\n",st.c_str()); return 1; }
         return 0;
     }

@@ -21,7 +21,11 @@ inline std::string env_or(const char* k, const std::string& d) {
 inline std::string csv_dir()  { return env_or("IBKRCRYPTO_CSVDIR",  "/Users/jo/Crypto/backtest/data"); }
 inline std::string ndx_csv()  { return env_or("IBKRCRYPTO_NDXCSV",  "/Users/jo/Tick/NDX_daily_2016_2026.csv"); }
 inline std::string fund_dir() { return env_or("IBKRCRYPTO_FUNDDIR", "/Users/jo/Crypto/backtest/data/funding"); }
-inline std::string bt_bin()   { return env_or("IBKRCRYPTO_BT",      "/Users/jo/Crypto/backtest/ibkrcrypto_bt"); }
+// S-2026-07-12: point at the CMake-built binary (build/), NOT the stale hand-compiled
+// backtest/ copy. The dual-binary trap silently ran a Jul-5 %.2f-quantized binary in the
+// live book for weeks (sub-$1 coin closes mis-booked) while fixes only rebuilt build/.
+// Single source of truth = build/, which is where every production cron binary lives.
+inline std::string bt_bin()   { return env_or("IBKRCRYPTO_BT",      "/Users/jo/Crypto/build/ibkrcrypto_bt"); }
 inline std::string data_dir() { return env_or("IBKRCRYPTO_DATADIR", "/Users/jo/Crypto/backtest/data/ibkrcrypto"); }
 
 struct Leg {
