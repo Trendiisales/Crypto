@@ -642,6 +642,113 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (mode == "xsgrid") {
+        // CROSS-ASSET BE-CASCADE GRID (S-2026-07-12b): port test of the crypto up-jump
+        // BE-cascade mimic onto GOLD + STOCK INDICES (operator request,
+        // SESSION_HANDOFF_2026-07-12a). Same live-header mechanism (engine_book_stagger
+        // = the REAL UpJumpLadderCompanion), long-only, no DMA gates.
+        // Per-symbol REAL round-trip cost: XAU ~5bp RT (IBKR 2*0.015%+spread),
+        // index CFD/fut ~3bp — crypto's 20bp would strawman-kill the port.
+        // Gate row = OOS episodes entering >=2023 (fair long-only window, bear omitted);
+        // FULL period printed alongside so the bleed is visible, never hidden.
+        // Parent ride-WIDE shown side-by-side: ADDITIVE books, never a dominance test
+        // (CompanionDominanceError).
+        std::printf("XS GRID — gold+indices BE-cascade mimic (live header, real costs), UJW_TF=%s\n",
+                    getenv("UJW_TF") ? getenv("UJW_TF") : "1h");
+        std::printf("%-5s %3s %4s | %4s %8s %6s | %4s %8s %6s %8s %8s %8s %8s %8s | %4s %8s %8s %6s %8s %5s\n",
+            "sym", "W", "thr", "nwF", "parF%", "ppfF", "nF", "netF%", "pfF", "H1", "H2", "2xF", "y22", "ddbp",
+            "nwO", "parO%", "netO%", "pfO", "2xO", "gate");
+        struct XS { std::string sym; double rt; };
+        std::vector<XS> syms = { {"XAU", 5.0}, {"SPX", 3.0}, {"DJ30", 3.0}, {"NDX", 3.0} };
+        std::vector<double> arms = {0.2, 2, 3, 4, 6, 8};   // BE-N6 (crypto winner family)
+        for (auto& s : syms) {
+            if (!B.count(s.sym)) B[s.sym] = load(s.sym);
+            const Bars& b = B[s.sym]; if (!b.N) continue;
+            for (int W : {5, 10, 24}) {
+                for (double thr : {0.02, 0.03, 0.04, 0.05}) {
+                    auto ws = parent(b, W, thr);
+                    if (ws.size() < 5) continue;
+                    // parent ride-WIDE book: entry next-open epx, exit next-open
+                    auto par_book = [&](const std::vector<Window>& v, double& pf) {
+                        double pw = 0, pl = 0, net = 0;
+                        for (auto& w : v) {
+                            int x = std::min(w.xi, b.N - 1);
+                            double r_ = (b.o[x] / w.epx - 1.0) * 100.0 - s.rt / 100.0;
+                            net += r_; if (r_ > 0) pw += r_; else pl -= r_;
+                        }
+                        pf = pl > 0 ? pw / pl : (pw > 0 ? 999 : 0);
+                        return net;
+                    };
+                    double ppfF = 0; double parF = par_book(ws, ppfF);
+                    auto rowsF = engine_book_stagger(b, ws, arms, 1, 0, s.rt);
+                    double n2xF = book_net(engine_book_stagger(b, ws, arms, 1, 0, 2 * s.rt));
+                    Met mF = metrics(rowsF, ws, b, n2xF);
+                    // OOS gate subset: episodes ENTERING >= 2023
+                    std::vector<Window> wsO;
+                    for (auto& w : ws) if (year_of(b.ts[w.ei]) >= 2023) wsO.push_back(w);
+                    double netO = 0, pfO = 0, n2xO = 0, parO = 0, ppfO = 0; int nO = 0; bool gate = false;
+                    if (wsO.size() >= 5) {
+                        parO = par_book(wsO, ppfO);
+                        auto rowsO = engine_book_stagger(b, wsO, arms, 1, 0, s.rt);
+                        n2xO = book_net(engine_book_stagger(b, wsO, arms, 1, 0, 2 * s.rt));
+                        Met mO = metrics(rowsO, wsO, b, n2xO);
+                        netO = mO.net; pfO = mO.pf; nO = mO.n;
+                        gate = (mO.net > 0) && (mO.pf >= 1.3) && (mO.h1 > 0) && (mO.h2 > 0) && (n2xO > 0);
+                    }
+                    std::printf("%-5s %3d %3.0f%% | %4zu %+8.1f %6.2f | %4d %+8.1f %6.2f %+8.1f %+8.1f %+8.1f %+8.1f %8.0f | %4d %+8.1f %+8.1f %6.2f %+8.1f %5s\n",
+                        s.sym.c_str(), W, thr * 100, ws.size(), parF, ppfF,
+                        mF.n, mF.net, mF.pf, mF.h1, mF.h2, n2xF, mF.y2022, mF.maxdd_bp,
+                        nO, parO, netO, pfO, n2xO, gate ? "PASS" : "-");
+                }
+            }
+        }
+        return 0;
+    }
+
+    if (mode == "xsrandom") {
+        // Beta control for xsgrid candidate cells: same episode count+durations placed
+        // at RANDOM entries (non-overlap, 20 seeds), OOS>=2023 window set, through the
+        // same live-header stagger book. Distinguishes up-jump edge from long-only beta
+        // (indices quadrupled 2016-26 — any long book prints without this check).
+        struct XC { std::string sym; int W; double thr, rt; };
+        std::vector<XC> cells = { {"XAU",10,0.02,5.0}, {"SPX",10,0.03,3.0},
+                                  {"DJ30",10,0.04,3.0}, {"NDX",10,0.02,3.0} };
+        std::vector<double> arms = {0.2, 2, 3, 4, 6, 8};
+        std::printf("%-5s %10s %12s %10s %8s\n", "sym", "actual%", "random_mu%", "sd", "z");
+        for (auto& c : cells) {
+            if (!B.count(c.sym)) B[c.sym] = load(c.sym);
+            const Bars& b = B[c.sym]; if (!b.N) continue;
+            auto wsAll = parent(b, c.W, c.thr);
+            std::vector<Window> ws;
+            for (auto& w : wsAll) if (year_of(b.ts[w.ei]) >= 2023) ws.push_back(w);
+            if (ws.size() < 5) continue;
+            double actual = book_net(engine_book_stagger(b, ws, arms, 1, 0, c.rt));
+            std::vector<int> durs; for (auto& w : ws) durs.push_back(w.xi - w.ei);
+            int lo0 = c.W + 1;
+            while (lo0 < b.N && year_of(b.ts[lo0]) < 2023) lo0++;   // random placement inside the SAME OOS window
+            std::vector<double> nets;
+            for (int seed = 0; seed < 20; seed++) {
+                std::mt19937 rng(1000 + seed);
+                std::vector<int> d = durs; std::shuffle(d.begin(), d.end(), rng);
+                std::vector<std::pair<int, int>> placed; std::vector<Window> rws;
+                for (int dur : d) {
+                    for (int tries = 0; tries < 200; tries++) {
+                        int lo = lo0, hi = b.N - 2 - dur; if (hi <= lo) break;
+                        int ei = lo + (int)(rng() % (uint64_t)(hi - lo));
+                        bool ok = true;
+                        for (auto& pl : placed) if (ei < pl.second && ei + dur > pl.first) { ok = false; break; }
+                        if (ok) { placed.push_back({ei, ei + dur}); rws.push_back({ei, ei + dur, b.o[ei], c.thr}); break; }
+                    }
+                }
+                nets.push_back(book_net(engine_book_stagger(b, rws, arms, 1, 0, c.rt)));
+            }
+            double mu = 0; for (double v : nets) mu += v; mu /= nets.size();
+            double sd = 0; for (double v : nets) sd += (v - mu) * (v - mu); sd = std::sqrt(sd / nets.size());
+            std::printf("%-5s %+10.1f %+12.1f %10.1f %8.1f\n", c.sym.c_str(), actual, mu, sd, sd > 0 ? (actual - mu) / sd : 0);
+        }
+        return 0;
+    }
+
     std::fprintf(stderr, "unknown mode %s\n", mode.c_str());
     return 1;
 }
