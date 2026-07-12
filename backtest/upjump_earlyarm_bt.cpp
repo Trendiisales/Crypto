@@ -50,7 +50,7 @@ static int env_cap(int dflt) {
 static const int64_t TF_MS = 3600LL * 1000;
 static const int SMA_BARS = 200 * 24;
 
-struct Bars { std::vector<int64_t> ts; std::vector<double> o, c, sma; int N = 0; };
+struct Bars { std::vector<int64_t> ts; std::vector<double> o, h, l, c, sma; int N = 0; };
 struct RCfg { int W = 4; double thr = 0.05, cg = 0, ta = 3, tg = 0.5, wa = 8, wg = 0.5, rc = 0.05; int ts_ = 0, ws = 0, cap = 5; };
 struct Clip { int64_t ts; double net_bp; int epi; };
 struct Window { int ei, xi; double epx; double jump; };   // jump = j at trigger bar
@@ -69,7 +69,7 @@ static Bars load(const std::string& coin) {
     if (!f) { std::fprintf(stderr, "[skip] no %s data for %s\n", tf.c_str(), coin.c_str()); b.N = 0; return b; }
     std::string ln; std::getline(f, ln);
     while (std::getline(f, ln)) { auto v = split(ln); if (v.size() < 5) continue;
-        b.ts.push_back((int64_t)std::stoll(v[0])); b.o.push_back(std::stod(v[1])); b.c.push_back(std::stod(v[4])); }
+        b.ts.push_back((int64_t)std::stoll(v[0])); b.o.push_back(std::stod(v[1])); b.h.push_back(std::stod(v[2])); b.l.push_back(std::stod(v[3])); b.c.push_back(std::stod(v[4])); }
     b.N = (int)b.ts.size(); b.sma.assign(b.N, 0.0); double run = 0;
     for (int i = 0; i < b.N; i++) { run += b.c[i];
         if (i >= SMA_BARS) run -= b.c[i - SMA_BARS];
@@ -206,10 +206,17 @@ static std::vector<Clip> engine_book_stagger(const Bars& b, const std::vector<Wi
         c.cost_gate_bp = 0; c.confirm_bp = 0; c.be_floor = false;
         c.det_w = 0; c.tf_secs = 3600; c.round_trip_bp = rt_bp;
         c.stagger_mode = stagger_mode; c.stagger_k = stagger_k; c.stagger_be_bp = 20.0;
+        if (getenv("LOSS_CUT")) c.loss_cut_bp = atof(getenv("LOSS_CUT"));   // cold-loss cut sweep
         UpJumpLadderCompanion eng(c);
         int64_t cur_real_ts = 0;
         eng.set_on_clip([&](const UpJumpLadderCompanion::ClipRecord& rec) { out.push_back({cur_real_ts, rec.net_bp_real, epi}); });
-        for (int i = w.ei; i < w.xi; i++) { cur_real_ts = b.ts[i]; eng.observe(true, w.epx, b.c[i], (int64_t)i * TF_MS); }
+        for (int i = w.ei; i < w.xi; i++) {
+            cur_real_ts = b.ts[i];
+            // intra-bar: feed the bar LOW first (a within-bar tick) so the hard reversal cut
+            // can fire at the stop, THEN the close (drives detection + giveback/reversal).
+            if (c.loss_cut_bp > 0.0 && i < (int)b.l.size()) eng.stop_check_only(b.l[i], (int64_t)i * TF_MS);  // bar low tests the stop
+            eng.observe(true, w.epx, b.c[i], (int64_t)i * TF_MS);
+        }
         int lastix = (w.xi - 1 >= w.ei) ? w.xi - 1 : w.ei;
         double lastpx = (w.xi - 1 >= w.ei) ? b.c[w.xi - 1] : w.epx;
         cur_real_ts = b.ts[lastix];
@@ -921,6 +928,32 @@ int main(int argc, char** argv) {
                     tc.coin.c_str(),tc.W,thr*100, nfn,nfp,nfN,nfNeg, bfn,bfp,bfN,bfNeg);
             }
         }
+        return 0;
+    }
+
+
+    if (mode == "coldcut") {
+        // COLD-LOSS-CUT sweep (operator 2026-07-13). No-floor ladder + a bounded stop on UNARMED
+        // legs. Shows the REAL column (net_bp_real), worst single clip, #neg clips, at cut levels.
+        // Goal: cap the -146bp tail while keeping the book net-positive.
+        std::printf("COLD-CUT sweep — no-floor ladder + bounded unarmed-leg stop, REAL column\n");
+        std::printf("%-5s %5s | %5s %8s %6s %6s %8s\n","coin","cut","n","net%","PF","neg","worst_bp");
+        struct TC{std::string c;int W;}; std::vector<TC> tcs={{"ETH",1},{"SOL",1},{"NEAR",1},{"UNI",1},{"DOGE",4}};
+        std::vector<double> arms={0.2,2,3,4,6,8};
+        for (auto& tc:tcs){
+            if(!B.count(tc.c))B[tc.c]=load(tc.c); const Bars& b=B[tc.c]; if(!b.N)continue;
+            auto ws=parent(b,tc.W,0.005);
+            for (const char* cut : {"0","20","30","50"}) {
+                setenv("LOSS_CUT",cut,1);
+                auto rows=engine_book_stagger(b,ws,arms,1,0,20.0);
+                double net=0,gw=0,gl=0,worst=0; int neg=0;
+                for(auto& r:rows){net+=r.net_bp/100.0; if(r.net_bp>0)gw+=r.net_bp; else{gl-=r.net_bp;neg++;} if(r.net_bp<worst)worst=r.net_bp;}
+                double pf=gl>0?gw/gl:(gw>0?999:0);
+                std::printf("%-5s %4sbp | %5zu %+8.0f %6.2f %6d %+8.0f\n",tc.c.c_str(),cut,rows.size(),net,pf,neg,worst);
+            }
+            std::printf("\n");
+        }
+        unsetenv("LOSS_CUT");
         return 0;
     }
 
