@@ -938,18 +938,31 @@ int main(int argc, char** argv) {
         // Goal: cap the -146bp tail while keeping the book net-positive.
         std::printf("COLD-CUT sweep — no-floor ladder + bounded unarmed-leg stop, REAL column\n");
         std::printf("%-5s %5s | %5s %8s %6s %6s %8s\n","coin","cut","n","net%","PF","neg","worst_bp");
-        struct TC{std::string c;int W;}; std::vector<TC> tcs={{"ETH",1},{"SOL",1},{"NEAR",1},{"UNI",1},{"DOGE",4}};
+        struct TC{std::string c;int W;}; std::vector<TC> tcs;
+        { const char* ws=getenv("CC_W"); std::string wl=ws?ws:"12,24,48";
+          std::stringstream ss(wl); std::string t; while(std::getline(ss,t,',')) if(!t.empty()) tcs.push_back({getenv("CC_COIN")?getenv("CC_COIN"):"XAU", atoi(t.c_str())}); }
         std::vector<double> arms={0.2,2,3,4,6,8};
         for (auto& tc:tcs){
             if(!B.count(tc.c))B[tc.c]=load(tc.c); const Bars& b=B[tc.c]; if(!b.N)continue;
-            auto ws=parent(b,tc.W,0.005);
-            for (const char* cut : {"0","20","30","50"}) {
+            Bars bb = b;
+            if (getenv("CC_SHORT")) { for (int _i=0;_i<bb.N;_i++){ double t=bb.o[_i]; (void)t; } // mirror price so down-jump==up-jump
+                double base = b.c.size()? b.c[0]*2.0 : 0.0;
+                for (int _i=0;_i<bb.N;_i++){ bb.o[_i]=base-b.o[_i]; bb.c[_i]=base-b.c[_i]; double lo=base-b.h[_i], hi=base-b.l[_i]; bb.l[_i]=lo; bb.h[_i]=hi; } }
+            const Bars& bx = getenv("CC_SHORT") ? bb : b;
+            auto ws=parent(bx,tc.W,0.005);
+            for (const char* cut : {"0","50","70","100","150"}) {
                 setenv("LOSS_CUT",cut,1);
-                auto rows=engine_book_stagger(b,ws,arms,1,0,20.0);
+                auto rows=engine_book_stagger(bx,ws,arms,1,0,20.0);
                 double net=0,gw=0,gl=0,worst=0; int neg=0;
                 for(auto& r:rows){net+=r.net_bp/100.0; if(r.net_bp>0)gw+=r.net_bp; else{gl-=r.net_bp;neg++;} if(r.net_bp<worst)worst=r.net_bp;}
                 double pf=gl>0?gw/gl:(gw>0?999:0);
-                std::printf("%-5s %4sbp | %5zu %+8.0f %6.2f %6d %+8.0f\n",tc.c.c_str(),cut,rows.size(),net,pf,neg,worst);
+                // WF halves by clip order + by calendar (2022 vs 2023-26) via ts
+                std::vector<Clip> so=rows; std::sort(so.begin(),so.end(),[](const Clip&a,const Clip&c){return a.ts<c.ts;});
+                double h1=0,h2=0,y22=0,y2326=0;
+                for(size_t k=0;k<so.size();k++){ if(k<so.size()/2)h1+=so[k].net_bp/100.0; else h2+=so[k].net_bp/100.0;
+                    if(year_of(so[k].ts)<=2022)y22+=so[k].net_bp/100.0; else y2326+=so[k].net_bp/100.0; }
+                std::printf("%-5s %4sbp | %5zu %+8.0f %6.2f %6d %+8.0f | H1%+7.0f H2%+7.0f | y22%+7.0f y23-26%+7.0f\n",
+                    tc.c.c_str(),cut,rows.size(),net,pf,neg,worst,h1,h2,y22,y2326);
             }
             std::printf("\n");
         }
