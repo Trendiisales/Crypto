@@ -1226,6 +1226,172 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (mode == "campaign") {
+        // ── PARENT+MIMIC CAMPAIGN sim (operator directive 2026-07-13j §2.13) ──────────────
+        // Two virtual lots per up-jump window:
+        //   PARENT: confirmed entry (fav >= CP_CONFIRM bp from window entry px), structural
+        //           stop, fee-BE arm, net-lock, HWM trail (CP_PTRAIL; 0 = ride-to-reversal,
+        //           BE/lock floors stay on). Flush at window end (reversal j <= -thr).
+        //   MIMIC:  CP_MFRAC of parent notional. Opens ONLY when ALL true: parent locked net
+        //           covers mimic worst-case (funding equation: locked >= mfrac*(mstop+RT+slip+
+        //           reserve)), parent MFE >= CP_MACT, fresh continuation (pullback >= CP_RESET
+        //           bp from campaign HWM then close breaks HWM), no active mimic, < CP_MMAX
+        //           mimics this campaign. Fast mgmt: stop CP_MSTOP, fee-BE arm +27bp, net-lock
+        //           +50bp, HWM trail CP_MTRAIL from +60bp. Flushes with parent.
+        // NEVER mimics a losing parent (funding gate implies locked net > 0).
+        // Mimic judged STANDALONE (own book, mimic units) + combined (parent units).
+        // Stops tested on bar LOW (pessimistic), exits at stop px. Costs charged per lot.
+        // Envs: CP_COIN CP_W CP_THR CP_RT(20) CP_SLIP(3) CP_RESERVE(2) CP_CONFIRM(20)
+        //       CP_FROMYEAR(2023) CP_MFRAC(0.25) CP_RESET(15) CP_MMAX(3)
+        //       CP_PSTOP CP_PTRAIL CP_MACT CP_MSTOP CP_MTRAIL  (comma lists -> full grid)
+        //       CP_MIMIC=0 parent-only rows.
+        auto envs = [](const char* k, const char* d) { const char* e = getenv(k); return std::string(e ? e : d); };
+        auto envd = [&](const char* k, double d) { const char* e = getenv(k); return e ? atof(e) : d; };
+        auto list = [&](const char* k, const char* d) {
+            std::vector<double> v; std::stringstream ss(envs(k, d)); std::string t;
+            while (std::getline(ss, t, ',')) if (!t.empty()) v.push_back(atof(t.c_str())); return v; };
+        std::string coin = argc > 2 ? argv[2] : envs("CP_COIN", "TRX");
+        int W = (int)envd("CP_W", 8);
+        double thr = envd("CP_THR", 0.035);
+        double RT = envd("CP_RT", 20.0), SLIP = envd("CP_SLIP", 3.0), RES = envd("CP_RESERVE", 2.0);
+        double CONF = envd("CP_CONFIRM", 20.0), MFRAC = envd("CP_MFRAC", 0.25);
+        double RESET = envd("CP_RESET", 15.0); int MMAX = (int)envd("CP_MMAX", 3);
+        int DELAY = (int)envd("CP_DELAY", 0);   // §2.12 robustness: enter N bars after confirm
+        int fromyear = (int)envd("CP_FROMYEAR", 2023);
+        bool mimic_on = envd("CP_MIMIC", 1) > 0;
+        auto pstops = list("CP_PSTOP", "30,50,70");
+        auto ptrails = list("CP_PTRAIL", "0,25,35,50,70");
+        auto macts = list("CP_MACT", "60");
+        auto mstops = list("CP_MSTOP", "16");
+        auto mtrails = list("CP_MTRAIL", "22");
+
+        if (!B.count(coin)) B[coin] = load(coin);
+        const Bars& b = B[coin]; if (!b.N) { std::fprintf(stderr, "no data for %s\n", coin.c_str()); return 1; }
+        auto ws = parent(b, W, thr);
+        if (fromyear > 0) { std::vector<Window> fw; for (auto& w : ws) if (year_of(b.ts[w.ei]) >= fromyear) fw.push_back(w); ws = fw; }
+
+        struct CClip { int64_t ts; double bp; bool is_mimic; int epi; };
+        // one full campaign sim -> clips (parent bp in parent units, mimic bp in mimic units)
+        auto run = [&](double pstop, double ptrail, double mact, double mstop, double mtrail,
+                       double rt) -> std::vector<CClip> {
+            std::vector<CClip> out;
+            double fund_need = MFRAC * (mstop + rt + SLIP + RES);  // parent-unit bp mimic worst-case
+            for (size_t wi = 0; wi < ws.size(); wi++) {
+                const Window& w = ws[wi];
+                bool popen = false, pdone = false; double pe = 0, phwm = 0, pstop_px = 0;
+                bool mopen = false; double me = 0, mhwm = 0, mstop_px = 0; int mcount = 0;
+                bool pulled = false;      // fresh-continuation state: pullback seen since HWM
+                auto close_mimic = [&](int64_t ts, double px) {
+                    out.push_back({ts, (px / me - 1.0) * 1e4 - rt, true, (int)wi}); mopen = false; };
+                auto close_parent = [&](int64_t ts, double px) {
+                    out.push_back({ts, (px / pe - 1.0) * 1e4 - rt, false, (int)wi}); popen = false; };
+                for (int i = w.ei; i < w.xi; i++) {
+                    double cl = b.c[i], lo = b.l[i]; int64_t ts = b.ts[i];
+                    if (!popen) {
+                        if (pdone) break;   // ONE parent entry per window — campaign over on parent exit
+                        double fav = (cl / w.epx - 1.0) * 1e4;
+                        if (fav >= CONF) {
+                            if (DELAY > 0 && i + DELAY < w.xi) { cl = b.c[i + DELAY]; i += DELAY; }  // delayed-entry robustness
+                            popen = true; pdone = true; pe = cl; phwm = cl; pstop_px = pe * (1.0 - pstop / 1e4); pulled = false; mcount = 0;
+                        }
+                        continue;
+                    }
+                    // 1) stops on bar low (mimic first: faster lot; then parent — parent stop ends campaign)
+                    if (mopen && lo <= mstop_px) close_mimic(ts, mstop_px);
+                    if (lo <= pstop_px) {
+                        if (mopen) close_mimic(ts, std::min(cl, mstop_px > lo ? mstop_px : cl)); // campaign ends -> mimic flush
+                        close_parent(ts, pstop_px);
+                        continue;   // campaign over; no re-entry inside this window (parent lot is one entry)
+                    }
+                    // 2) close-driven updates
+                    if (cl < phwm * (1.0 - RESET / 1e4)) pulled = true;
+                    bool new_high = cl > phwm;
+                    if (new_high) phwm = cl;
+                    double pmfe = (phwm / pe - 1.0) * 1e4;
+                    // parent ladder — geometry scales with the stop (spec anchor pstop=50:
+                    // fee-BE arm +45, net-lock +90 (locks 0.4*stop net), trail active +100)
+                    if (pmfe >= 0.9 * pstop) pstop_px = std::max(pstop_px, pe * (1.0 + (rt + 3.0) / 1e4));
+                    if (pmfe >= 1.8 * pstop) pstop_px = std::max(pstop_px, pe * (1.0 + (rt + 0.4 * pstop) / 1e4));
+                    if (ptrail > 0 && pmfe >= 2.0 * pstop) pstop_px = std::max(pstop_px, phwm * (1.0 - ptrail / 1e4));
+                    // mimic ladder — spec anchor mstop=16: fee-BE +27, lock +50 (0.6*stop net), trail +60
+                    if (mopen) {
+                        if (cl > mhwm) mhwm = cl;
+                        double mmfe = (mhwm / me - 1.0) * 1e4;
+                        if (mmfe >= 1.7 * mstop) mstop_px = std::max(mstop_px, me * (1.0 + (rt + 3.0) / 1e4));
+                        if (mmfe >= 3.1 * mstop) mstop_px = std::max(mstop_px, me * (1.0 + (rt + 0.6 * mstop) / 1e4));
+                        if (mmfe >= 3.75 * mstop) mstop_px = std::max(mstop_px, mhwm * (1.0 - mtrail / 1e4));
+                    }
+                    // 3) mimic open: funded + activated + fresh continuation (pullback then new high)
+                    if (mimic_on && !mopen && mcount < MMAX && new_high && pulled) {
+                        double locked = (pstop_px / pe - 1.0) * 1e4 - rt;
+                        if (pmfe >= mact && locked >= fund_need) {
+                            mopen = true; me = cl; mhwm = cl; mstop_px = me * (1.0 - mstop / 1e4);
+                            mcount++; pulled = false;
+                        }
+                    }
+                    if (new_high) pulled = false;
+                }
+                // window end (parent reversal signal): flush both at last close
+                int lastix = (w.xi - 1 >= w.ei) ? w.xi - 1 : w.ei;
+                double lastpx = b.c[lastix];
+                if (mopen) close_mimic(b.ts[lastix], lastpx);
+                if (popen) close_parent(b.ts[lastix], lastpx);
+            }
+            return out;
+        };
+
+        auto summarize = [&](const std::vector<CClip>& rows, double& pnet, double& mnet, double& comb,
+                             double& pf, int& pn, int& mn, double& worst, double& h1, double& h2,
+                             double& medwin, double& mpf, double& mworst) {
+            pnet = mnet = comb = worst = h1 = h2 = medwin = 0; pn = mn = 0; mpf = 0; mworst = 0;
+            double gw = 0, gl = 0, mgw = 0, mgl = 0; std::vector<double> wins;
+            std::vector<CClip> so = rows;
+            std::sort(so.begin(), so.end(), [](const CClip& a, const CClip& c) { return a.ts < c.ts; });
+            for (size_t k = 0; k < so.size(); k++) {
+                const auto& r = so[k];
+                double cb = r.is_mimic ? r.bp * MFRAC : r.bp;   // combined book in parent units
+                comb += cb / 100.0;
+                if (r.is_mimic) { mnet += r.bp / 100.0; mn++;
+                    if (r.bp > 0) mgw += r.bp; else mgl -= r.bp;
+                    if (r.bp < mworst) mworst = r.bp;
+                } else { pnet += r.bp / 100.0; pn++; }
+                if (cb > 0) { gw += cb; wins.push_back(r.bp); } else gl -= cb;
+                if (cb < worst) worst = cb;
+                if (k < so.size() / 2) h1 += cb / 100.0; else h2 += cb / 100.0;
+            }
+            pf = gl > 0 ? gw / gl : (gw > 0 ? 999 : 0);
+            mpf = mgl > 0 ? mgw / mgl : (mgw > 0 ? 999 : 0);
+            if (!wins.empty()) { std::sort(wins.begin(), wins.end()); medwin = wins[wins.size() / 2]; }
+        };
+        auto exbest = [&](const std::vector<CClip>& rows) {   // comb net minus best EPISODE (concentration gate)
+            std::map<int, double> epi; double tot = 0, best = 0;
+            for (auto& r : rows) { double cb = (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0; epi[r.epi] += cb; tot += cb; }
+            for (auto& kv : epi) if (kv.second > best) best = kv.second;
+            return tot - best;
+        };
+
+        std::printf("CAMPAIGN %s W=%d thr=%.1f%% conf=%.0fbp RT=%.0f slip=%.0f res=%.0f mfrac=%.2f reset=%.0f mmax=%d from%d windows=%zu%s\n",
+            coin.c_str(), W, thr * 100, CONF, RT, SLIP, RES, MFRAC, RESET, MMAX, fromyear, ws.size(),
+            mimic_on ? "" : "  [PARENT-ONLY]");
+        std::printf("%5s %6s %5s %5s %5s | %4s %8s | %4s %8s %6s %7s | %8s %6s %8s | %8s %8s | %6s | %8s %8s\n",
+            "pstop", "ptrail", "mact", "mstop", "mtrl", "pn", "pnet%", "mn", "mnet%", "mPF", "mworst", "comb%", "PF", "worst_bp", "H1%", "H2%", "medWin", "comb30%", "comb40%");  // +exBest col appended
+        for (double ps : pstops) for (double pt : ptrails)
+        for (double ma : macts) for (double mst : mstops) for (double mt : mtrails) {
+            auto rows = run(ps, pt, ma, mst, mt, RT);
+            double pnet, mnet, comb, pf, worst, h1, h2, medwin, mpf, mworst; int pn, mn;
+            summarize(rows, pnet, mnet, comb, pf, pn, mn, worst, h1, h2, medwin, mpf, mworst);
+            // stress re-sims: 30bp acceptance + 40bp (2x) — full re-sim, gate sees the cost
+            auto r30 = run(ps, pt, ma, mst, mt, 30.0);
+            auto r40 = run(ps, pt, ma, mst, mt, 40.0);
+            double c30 = 0, c40 = 0;
+            for (auto& r : r30) c30 += (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0;
+            for (auto& r : r40) c40 += (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0;
+            std::printf("%5.0f %6.0f %5.0f %5.0f %5.0f | %4d %+8.0f | %4d %+8.0f %6.2f %+7.0f | %+8.0f %6.2f %+8.0f | %+8.0f %+8.0f | %6.0f | %+8.0f %+8.0f | exB%+7.0f\n",
+                ps, pt, ma, mst, mt, pn, pnet, mn, mnet, mpf, mworst, comb, pf, worst, h1, h2, medwin, c30, c40, exbest(rows));
+        }
+        return 0;
+    }
+
     std::fprintf(stderr, "unknown mode %s\n", mode.c_str());
     return 1;
 }
