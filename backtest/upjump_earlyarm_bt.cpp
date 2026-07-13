@@ -1257,6 +1257,8 @@ int main(int argc, char** argv) {
         double CONF = envd("CP_CONFIRM", 20.0), MFRAC = envd("CP_MFRAC", 0.25);
         double RESET = envd("CP_RESET", 15.0); int MMAX = (int)envd("CP_MMAX", 3);
         int DELAY = (int)envd("CP_DELAY", 0);   // §2.12 robustness: enter N bars after confirm
+        int H0 = -1, H1g = -1;                  // CP_HOURS=7-20 UTC: parent entry session gate
+        { const char* he = getenv("CP_HOURS"); if (he) sscanf(he, "%d-%d", &H0, &H1g); }
         int fromyear = (int)envd("CP_FROMYEAR", 2023);
         bool mimic_on = envd("CP_MIMIC", 1) > 0;
         auto pstops = list("CP_PSTOP", "30,50,70");
@@ -1290,6 +1292,8 @@ int main(int argc, char** argv) {
                     if (!popen) {
                         if (pdone) break;   // ONE parent entry per window — campaign over on parent exit
                         double fav = (cl / w.epx - 1.0) * 1e4;
+                        int hr = (int)((b.ts[i] / 3600000) % 24);
+                        if (H0 >= 0 && (hr < H0 || hr > H1g)) continue;   // outside session: no entry
                         if (fav >= CONF) {
                             if (DELAY > 0 && i + DELAY < w.xi) { cl = b.c[i + DELAY]; i += DELAY; }  // delayed-entry robustness
                             popen = true; pdone = true; pe = cl; phwm = cl; pstop_px = pe * (1.0 - pstop / 1e4); pulled = false; mcount = 0;
@@ -1370,6 +1374,41 @@ int main(int argc, char** argv) {
             return tot - best;
         };
 
+        // CP_RANDOM=N: beta/random-entry control — same window count + durations placed uniformly
+        // at random (non-overlap), FIRST lever combo only, same session gate/confirm/costs. z vs cloud.
+        if (int NSEED = (int)envd("CP_RANDOM", 0)) {
+            double ps = pstops[0], pt = ptrails[0], ma = macts[0], mst = mstops[0], mt = mtrails[0];
+            auto net_of = [&](const std::vector<CClip>& rows) {
+                double s = 0; for (auto& r : rows) s += (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0; return s; };
+            std::vector<Window> real_ws = ws;
+            double actual = net_of(run(ps, pt, ma, mst, mt, RT));
+            std::vector<int> durs; for (auto& w : real_ws) durs.push_back(w.xi - w.ei);
+            int lo_bound = W + 1;
+            if (fromyear > 0) while (lo_bound < b.N && year_of(b.ts[lo_bound]) < fromyear) lo_bound++;
+            std::vector<double> nets;
+            for (int seed = 0; seed < NSEED; seed++) {
+                std::mt19937 rng(1000 + seed);
+                std::vector<int> d = durs; std::shuffle(d.begin(), d.end(), rng);
+                std::vector<std::pair<int,int>> placed; std::vector<Window> rws;
+                for (int dur : d) for (int tries = 0; tries < 200; tries++) {
+                    int lo = lo_bound, hi = b.N - 2 - dur; if (hi <= lo) break;
+                    int ei = lo + (int)(rng() % (uint64_t)(hi - lo));
+                    bool ok = true;
+                    for (auto& pl : placed) if (ei < pl.second && ei + dur > pl.first) { ok = false; break; }
+                    if (ok) { placed.push_back({ei, ei + dur}); rws.push_back({ei, ei + dur, b.o[ei], thr}); break; }
+                }
+                ws = rws; nets.push_back(net_of(run(ps, pt, ma, mst, mt, RT)));
+            }
+            ws = real_ws;
+            double mu = 0; for (double v : nets) mu += v; mu /= nets.size();
+            double sd = 0; for (double v : nets) sd += (v - mu) * (v - mu); sd = std::sqrt(sd / nets.size());
+            int below = 0; for (double v : nets) if (v < actual) below++;
+            std::printf("CAMPRAND %s W=%d thr=%.2f%% ps=%.0f pt=%.0f seeds=%d: actual=%+.0f%% rand_mu=%+.0f%% sd=%.0f z=%+.2f pct=%.1f%%\n",
+                coin.c_str(), W, thr * 100, ps, pt, NSEED, actual, mu, sd, sd > 0 ? (actual - mu) / sd : 0,
+                100.0 * below / nets.size());
+            return 0;
+        }
+
         std::printf("CAMPAIGN %s W=%d thr=%.1f%% conf=%.0fbp RT=%.0f slip=%.0f res=%.0f mfrac=%.2f reset=%.0f mmax=%d from%d windows=%zu%s\n",
             coin.c_str(), W, thr * 100, CONF, RT, SLIP, RES, MFRAC, RESET, MMAX, fromyear, ws.size(),
             mimic_on ? "" : "  [PARENT-ONLY]");
@@ -1381,8 +1420,8 @@ int main(int argc, char** argv) {
             double pnet, mnet, comb, pf, worst, h1, h2, medwin, mpf, mworst; int pn, mn;
             summarize(rows, pnet, mnet, comb, pf, pn, mn, worst, h1, h2, medwin, mpf, mworst);
             // stress re-sims: 30bp acceptance + 40bp (2x) — full re-sim, gate sees the cost
-            auto r30 = run(ps, pt, ma, mst, mt, 30.0);
-            auto r40 = run(ps, pt, ma, mst, mt, 40.0);
+            auto r30 = run(ps, pt, ma, mst, mt, envd("CP_ST1", 30.0));
+            auto r40 = run(ps, pt, ma, mst, mt, envd("CP_ST2", 40.0));
             double c30 = 0, c40 = 0;
             for (auto& r : r30) c30 += (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0;
             for (auto& r : r40) c40 += (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0;

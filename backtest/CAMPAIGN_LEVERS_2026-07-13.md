@@ -66,3 +66,29 @@ BTC/ETH/SOL/XRP/XLM/GRT/OP/BCH/AVAX/LTC: excluded with stated reason — 13j abs
 (dead on every window 2023–26, random-entry z≤0.9); no entry anchor exists to campaign on.
 
 Repro: `CP_MIMIC=0 CP_W=2 CP_THR=0.040 CP_PSTOP=216 CP_PTRAIL=270 CP_RESET=38 ./upjump_earlyarm_bt campaign UNI`
+
+## ADDENDUM (same session): random-entry controls + GOLD verdict
+
+`CP_RANDOM=100` control added to campaign mode (same window count+durations, uniform non-overlap
+placement, same config incl. session gate; 100 seeds).
+
+| cell | actual | rand_mu | z | verdict |
+|---|---|---|---|---|
+| UNI-W1 135/270 | +74% | −8% | **+3.66** | PASS |
+| UNI-W2 216/270 | +156% | −17% | **+5.50** | PASS |
+| TRX-W8 111/ride | +92% | +11% | **+4.73** | PASS (episode-concentration flag stands) |
+| LDO-W8 411/342 | +68% | −26% | **+2.02** | PASS borderline — smallest size tier |
+| **GOLD W24/1.5% 88/ride h7-20UTC** | +33% | +14% | **+1.39** | **FAIL** |
+
+### GOLD CAMPAIGN ENGINE (13j Part 3): NOT BUILT — BT gate failed
+Tested at RT 8bp (+2 slip +1 reserve), stress 10/16bp, XAU H1 2022–2026-04:
+- W2/0.5% (live gold up-jump anchor): PF ≤1.25 everywhere, 16bp stress negative. FAIL.
+- W4/W8/W12 grids: all negative or PF≤1.23. FAIL.
+- Session-gated (7-20 UTC) W24/1.5% 88/ride: +33%/PF2.17, 16bp +27 — but thr neighbors
+  1.25%→+8/PF1.16, 1.75%→+10/PF1.34, 2.0%→−8 (isolated ridge) AND random-z +1.39 < 2
+  ⇒ indistinguishable from gold-bull drift at matched exposure. FAIL (absolute-truth standard).
+Scope of kill (verify-kill rule): the UP-JUMP-WINDOW entry anchor on H1 OHLC. The directive's
+other five entry families (compression breakout, first-pullback, VWAP reclaim, sweep recovery,
+micro-range) are UNTESTED — they need dedicated detectors and volume/flow/tick data (H1 CSV has
+none; Tick corpus has XAU ticks). Any future gold campaign build must first pass a faithful BT of
+one of those detectors. Existing live gold cells untouched.
