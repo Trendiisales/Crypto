@@ -40,6 +40,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <algorithm>
 #include <random>
 
@@ -932,6 +933,161 @@ int main(int argc, char** argv) {
     }
 
 
+    if (mode == "confirmcut") {
+        // CONFIRMED-ENTRY sweep (operator 2026-07-13b). Does Option-B confirm_bp ELIMINATE the
+        // REVERSAL_CUT / buy-the-top loss cluster while KEEPING the edge? SAME BE-cascade book
+        // as coldcut (= the current live gold up-jump behaviour), fixed cold-loss cut, but sweep
+        // confirm_bp incl. 0 (=immediate entry = current live). A leg stays FLAT (books nothing,
+        // pays no cost) until fav>=confirm_bp from window entry; never-confirmed legs cost ~0.
+        // Drives the REAL live header (net_bp_real); captures clip REASON + leg LABEL so we can
+        // count REVERSAL_CUT legs, all-neg legs, and NEVER-OPENED (never-confirmed) legs.
+        // Envs: CC_COIN(GOLD) CC_W(2) CC_THR(0.005) CC_RT(5) CC_CUT(30=cold-loss cut,0=off)
+        //       CC_CONFIRM(comma list, default 0,20,30,50,80)  CC_SHORT / CC_FADE (dir variants).
+        std::string coin = getenv("CC_COIN") ? getenv("CC_COIN") : "GOLD";
+        int W = getenv("CC_W") ? atoi(getenv("CC_W")) : 2;
+        double _thr = getenv("CC_THR") ? atof(getenv("CC_THR")) : 0.005;
+        double _rt  = getenv("CC_RT")  ? atof(getenv("CC_RT"))  : 5.0;
+        double _cut = getenv("CC_CUT") ? atof(getenv("CC_CUT")) : 30.0;
+        std::vector<double> confs;
+        { const char* ce=getenv("CC_CONFIRM"); std::string cl=ce?ce:"0,20,30,50,80";
+          std::stringstream ss(cl); std::string t; while(std::getline(ss,t,',')) if(!t.empty()) confs.push_back(atof(t.c_str())); }
+        std::vector<double> arms={0.2,2,3,4,6,8};   // BE-N6 (crypto winner family / live gold mimic)
+        if(!B.count(coin))B[coin]=load(coin);
+        const Bars& b=B[coin]; if(!b.N){std::fprintf(stderr,"no data for %s\n",coin.c_str());return 1;}
+        // direction/window construction identical to coldcut (LONG up-jump, or SHORT mirror, or FADE)
+        Bars bb=b;
+        if (getenv("CC_SHORT")) { double base=b.c.size()?b.c[0]*2.0:0.0;
+            for(int i=0;i<bb.N;i++){bb.o[i]=base-b.o[i];bb.c[i]=base-b.c[i];double lo=base-b.h[i],hi=base-b.l[i];bb.l[i]=lo;bb.h[i]=hi;} }
+        const Bars& bx = getenv("CC_SHORT")?bb:b;
+        std::vector<Window> ws;
+        if (getenv("CC_FADE")) {
+            bool pos=false;int ei=0;double epx=0,jent=0;
+            for(int i=W;i<bx.N;i++){double j=bx.c[i]/bx.c[i-W]-1.0;
+                if(!pos&&j<=-_thr){int e=i+1;if(e>=bx.N)continue;pos=true;ei=e;epx=bx.o[e];jent=j;}
+                else if(pos&&j>=_thr){int x=i+1;if(x>=bx.N)x=bx.N-1;ws.push_back({ei,x,epx,jent});pos=false;}}
+            if(pos)ws.push_back({ei,bx.N-1,epx,jent});
+        } else ws=parent(bx,W,_thr);
+        const char* dir = getenv("CC_SHORT")?"SHORT":(getenv("CC_FADE")?"FADE":"LONG");
+
+        std::printf("CONFIRMED-ENTRY sweep — %s %s W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp  BE-cascade book, REAL column\n",
+            coin.c_str(),dir,W,_thr*100,_rt,_cut);
+        std::printf("  windows=%zu  arms BE-N6 {0.2,2,3,4,6,8} (6 base tiers/window), reclip OFF, cap=#tiers, no ladder\n", ws.size());
+        std::printf("%-8s | %5s %9s %6s %8s | %5s %9s | %5s %9s | %6s | %9s %9s | %8s %10s | %9s %8s\n",
+            "confirm","n","net%","PF","worst_bp","nRev","sumRev%","nNeg","sumNeg%","nvrOpen","H1%","H2%","y2022%","y23-26%","exbestEpi","bestEpi%");
+
+        struct Rec{int64_t ts;double net;std::string reason,label;int epi;};
+        for (double CONF : confs) {
+            std::vector<Rec> rows; int total_legs=0, opened_legs=0;
+            for (size_t wi=0; wi<ws.size(); wi++){
+                const Window& w=ws[wi];
+                UpJumpLadderCompanion::Config c;
+                c.parent_tag="BT";c.tag="BT";c.symbol="bt";
+                c.tight={arms[0],0,0.50,0}; c.wide={arms[1],0,0.50,0};
+                for(size_t k=2;k<arms.size();k++)c.extra_base.push_back({arms[k],0,0.50,0});
+                c.reclip_pct=0.0; c.cap=(int)arms.size(); c.cost_gate_bp=0;
+                c.confirm_bp=CONF;                 // <-- the swept lever (Option-B confirmed entry)
+                c.be_floor=false; c.det_w=0; c.tf_secs=3600; c.round_trip_bp=_rt;
+                c.stagger_mode=1; c.stagger_k=0; c.stagger_be_bp=20.0;
+                c.loss_cut_bp=_cut;                // fixed cold-loss cut (30bp default)
+                UpJumpLadderCompanion eng(c);
+                int64_t cur_ts=0; std::set<std::string> opened_labels;
+                eng.set_on_clip([&](const UpJumpLadderCompanion::ClipRecord& rec){
+                    std::string lbl = rec.tag.size()>3 ? rec.tag.substr(3) : rec.tag;  // strip "BT-"
+                    rows.push_back({cur_ts,rec.net_bp_real,rec.reason,lbl,(int)wi});
+                    opened_labels.insert(lbl);
+                });
+                for(int i=w.ei;i<w.xi;i++){
+                    cur_ts=bx.ts[i];
+                    if(_cut>0.0 && i<(int)bx.l.size()) eng.stop_check_only(bx.l[i],(int64_t)i*TF_MS); // bar low tests the stop
+                    eng.observe(true,w.epx,bx.c[i],(int64_t)i*TF_MS);
+                }
+                int lastix=(w.xi-1>=w.ei)?w.xi-1:w.ei;
+                double lastpx=(w.xi-1>=w.ei)?bx.c[w.xi-1]:w.epx;
+                cur_ts=bx.ts[lastix];
+                eng.observe(false,w.epx,lastpx,(int64_t)lastix*TF_MS);
+                total_legs += (int)arms.size();            // 6 base tiers created per window
+                opened_legs += (int)opened_labels.size();  // distinct tiers that emitted >=1 clip (opened)
+            }
+            double net=0,gw=0,gl=0,worst=0,negsum=0,rev_sum=0; int neg=0,rev_n=0;
+            for(auto&r:rows){ net+=r.net/100.0; if(r.net>0)gw+=r.net; else{gl-=r.net;neg++;negsum+=r.net/100.0;}
+                if(r.net<worst)worst=r.net;
+                if(r.reason=="REVERSAL_CUT"){rev_n++;rev_sum+=r.net/100.0;} }
+            double pf=gl>0?gw/gl:(gw>0?999:0);
+            std::vector<Rec> so=rows; std::sort(so.begin(),so.end(),[](const Rec&a,const Rec&c){return a.ts<c.ts;});
+            double h1=0,h2=0,y22=0,y2326=0;
+            for(size_t k=0;k<so.size();k++){ if(k<so.size()/2)h1+=so[k].net/100.0; else h2+=so[k].net/100.0;
+                if(year_of(so[k].ts)<=2022)y22+=so[k].net/100.0; else y2326+=so[k].net/100.0; }
+            int never = total_legs - opened_legs;
+            std::map<int,double> epin; for(auto&r:rows) epin[r.epi]+=r.net/100.0;
+            double bestepi=0; for(auto&kv:epin) if(kv.second>bestepi)bestepi=kv.second;
+            std::printf("%6.0fbp | %5d %+9.0f %6.2f %+8.1f | %5d %+9.1f | %5d %+9.1f | %6d | %+9.0f %+9.0f | %+8.0f %+10.0f | %+9.0f %+8.0f\n",
+                CONF,(int)rows.size(),net,pf,worst,rev_n,rev_sum,neg,negsum,never,h1,h2,y22,y2326,net-bestepi,bestepi);
+        }
+        return 0;
+    }
+
+    if (mode == "confirmrand") {
+        // RANDOM-ENTRY CONTROL for a confirmcut cell: same window count + durations placed
+        // uniformly at random (non-overlapping), SAME UpJumpLadderCompanion config
+        // (confirm_bp entry + cold cut + BE-N6 book, REAL column). 20 seeds.
+        // Envs as confirmcut but CC_CONFIRM = single value (default 20). LONG only.
+        std::string coin = getenv("CC_COIN") ? getenv("CC_COIN") : "GOLD";
+        int W = getenv("CC_W") ? atoi(getenv("CC_W")) : 2;
+        double _thr = getenv("CC_THR") ? atof(getenv("CC_THR")) : 0.005;
+        double _rt  = getenv("CC_RT")  ? atof(getenv("CC_RT"))  : 5.0;
+        double _cut = getenv("CC_CUT") ? atof(getenv("CC_CUT")) : 30.0;
+        double CONF = getenv("CC_CONFIRM") ? atof(getenv("CC_CONFIRM")) : 20.0;
+        if(!B.count(coin))B[coin]=load(coin);
+        const Bars& b=B[coin]; if(!b.N){std::fprintf(stderr,"no data for %s\n",coin.c_str());return 1;}
+        auto ws = parent(b,W,_thr);
+        std::vector<double> arms={0.2,2,3,4,6,8};
+        auto run_ws=[&](const std::vector<Window>& wl)->double{
+            double net=0;
+            for (const Window& w : wl){
+                UpJumpLadderCompanion::Config c;
+                c.parent_tag="BT";c.tag="BT";c.symbol="bt";
+                c.tight={arms[0],0,0.50,0}; c.wide={arms[1],0,0.50,0};
+                for(size_t k=2;k<arms.size();k++)c.extra_base.push_back({arms[k],0,0.50,0});
+                c.reclip_pct=0.0; c.cap=(int)arms.size(); c.cost_gate_bp=0;
+                c.confirm_bp=CONF; c.be_floor=false; c.det_w=0; c.tf_secs=3600; c.round_trip_bp=_rt;
+                c.stagger_mode=1; c.stagger_k=0; c.stagger_be_bp=20.0; c.loss_cut_bp=_cut;
+                UpJumpLadderCompanion eng(c);
+                eng.set_on_clip([&](const UpJumpLadderCompanion::ClipRecord& rec){ net+=rec.net_bp_real/100.0; });
+                for(int i=w.ei;i<w.xi;i++){
+                    if(_cut>0.0 && i<(int)b.l.size()) eng.stop_check_only(b.l[i],(int64_t)i*TF_MS);
+                    eng.observe(true,w.epx,b.c[i],(int64_t)i*TF_MS);
+                }
+                int lastix=(w.xi-1>=w.ei)?w.xi-1:w.ei;
+                double lastpx=(w.xi-1>=w.ei)?b.c[w.xi-1]:w.epx;
+                eng.observe(false,w.epx,lastpx,(int64_t)lastix*TF_MS);
+            }
+            return net;
+        };
+        double actual = run_ws(ws);
+        std::vector<int> durs; for(auto&w:ws)durs.push_back(w.xi-w.ei);
+        std::vector<double> nets;
+        for(int seed=0;seed<20;seed++){
+            std::mt19937 rng(1000+seed);
+            std::vector<int> d=durs; std::shuffle(d.begin(),d.end(),rng);
+            std::vector<std::pair<int,int>> placed; std::vector<Window> rws;
+            for(int dur:d){
+                for(int tries=0;tries<200;tries++){
+                    int lo=W+1, hi=b.N-2-dur; if(hi<=lo)break;
+                    int ei=lo+(int)(rng()%(uint64_t)(hi-lo));
+                    bool ok=true;
+                    for(auto&pl:placed) if(ei<pl.second&&ei+dur>pl.first){ok=false;break;}
+                    if(ok){placed.push_back({ei,ei+dur});rws.push_back({ei,ei+dur,b.o[ei],_thr});break;}
+                }
+            }
+            nets.push_back(run_ws(rws));
+        }
+        double mu=0;for(double v:nets)mu+=v;mu/=nets.size();
+        double sd=0;for(double v:nets)sd+=(v-mu)*(v-mu);sd=std::sqrt(sd/nets.size());
+        std::printf("CONFIRMRAND %s W=%d thr=%.2f%% conf=%.0fbp cut=%.0f RT=%.0f: actual=%+.0f%%  rand_mu=%+.0f%%  sd=%.0f  z=%+.1f\n",
+            coin.c_str(),W,_thr*100,CONF,_cut,_rt,actual,mu,sd,sd>0?(actual-mu)/sd:0);
+        return 0;
+    }
+
     if (mode == "coldcut") {
         // COLD-LOSS-CUT sweep (operator 2026-07-13). No-floor ladder + a bounded stop on UNARMED
         // legs. Shows the REAL column (net_bp_real), worst single clip, #neg clips, at cut levels.
@@ -949,10 +1105,20 @@ int main(int argc, char** argv) {
                 double base = b.c.size()? b.c[0]*2.0 : 0.0;
                 for (int _i=0;_i<bb.N;_i++){ bb.o[_i]=base-b.o[_i]; bb.c[_i]=base-b.c[_i]; double lo=base-b.h[_i], hi=base-b.l[_i]; bb.l[_i]=lo; bb.h[_i]=hi; } }
             const Bars& bx = getenv("CC_SHORT") ? bb : b;
-            auto ws=parent(bx,tc.W,0.005);
-            for (const char* cut : {"0","50","70","100","150"}) {
+            double _thr=getenv("CC_THR")?atof(getenv("CC_THR")):0.005;
+            std::vector<Window> ws;
+            if (getenv("CC_FADE")) {
+                // MEAN-REVERSION: enter LONG on a DOWN-jump (j<=-thr), exit when it recovers (j>=+thr).
+                bool pos=false; int ei=0; double epx=0,jent=0;
+                for (int i=tc.W;i<bx.N;i++){ double j=bx.c[i]/bx.c[i-tc.W]-1.0;
+                    if(!pos && j<=-_thr){int e=i+1; if(e>=bx.N)continue; pos=true; ei=e; epx=bx.o[e]; jent=j;}
+                    else if(pos && j>=_thr){int x=i+1; if(x>=bx.N)x=bx.N-1; ws.push_back({ei,x,epx,jent}); pos=false;} }
+                if(pos) ws.push_back({ei,bx.N-1,epx,jent});
+            } else ws=parent(bx,tc.W,_thr);
+            double _rt = getenv("CC_RT") ? atof(getenv("CC_RT")) : 20.0;   // per-asset real RT cost
+            for (const char* cut : {"800","20","30","40","50","70"}) {      // 800 = effectively-off baseline
                 setenv("LOSS_CUT",cut,1);
-                auto rows=engine_book_stagger(bx,ws,arms,1,0,20.0);
+                auto rows=engine_book_stagger(bx,ws,arms,1,0,_rt);
                 double net=0,gw=0,gl=0,worst=0; int neg=0;
                 for(auto& r:rows){net+=r.net_bp/100.0; if(r.net_bp>0)gw+=r.net_bp; else{gl-=r.net_bp;neg++;} if(r.net_bp<worst)worst=r.net_bp;}
                 double pf=gl>0?gw/gl:(gw>0?999:0);
@@ -967,6 +1133,86 @@ int main(int argc, char** argv) {
             std::printf("\n");
         }
         unsetenv("LOSS_CUT");
+        return 0;
+    }
+
+    if (mode == "ccrandom") {
+        // BETA / RANDOM-ENTRY CONTROL for the coldcut BE-cascade result (operator 2026-07-13,
+        // standing crypto-mechanism-port mandate). Mirrors the coldcut config BYTE-FOR-BYTE
+        // (same coin/CC_SHORT mirror/CC_FADE, same W, thr, RT, LOSS_CUT, same BE-cascade arms,
+        // same live-header stagger book) but REPLACES the up-jump entry TRIGGER with RANDOM
+        // entries: same NUMBER of episodes and same per-episode DURATIONS, placed at random
+        // non-overlapping bar timestamps, seed-varied. Everything downstream (book, cut, cost,
+        // holding) is identical. If the REAL up-jump net does not sit FAR in the right tail of
+        // the random cloud, the "edge" is just long-only beta/exposure -> BETA-ONLY / DEAD.
+        //   Envs: CC_COIN, CC_W, CC_THR, CC_RT, CC_CUT(=LOSS_CUT bp, default 30),
+        //         CC_SHORT (down-jump mirror), CC_FADE (mean-reversion entry), CC_SEEDS(>=200).
+        std::string coin = getenv("CC_COIN") ? getenv("CC_COIN") : "XAU";
+        int W = getenv("CC_W") ? atoi(getenv("CC_W")) : 2;
+        double _thr = getenv("CC_THR") ? atof(getenv("CC_THR")) : 0.005;
+        double _rt = getenv("CC_RT") ? atof(getenv("CC_RT")) : 20.0;
+        const char* cut = getenv("CC_CUT") ? getenv("CC_CUT") : "30";
+        int NSEED = getenv("CC_SEEDS") ? atoi(getenv("CC_SEEDS")) : 200;
+        setenv("LOSS_CUT", cut, 1);
+        std::vector<double> arms = {0.2, 2, 3, 4, 6, 8};
+
+        if (!B.count(coin)) B[coin] = load(coin);
+        const Bars& b = B[coin]; if (!b.N) { std::fprintf(stderr, "no data for %s\n", coin.c_str()); return 1; }
+        // CC_SHORT price mirror (exactly as coldcut): down-jump becomes up-jump on mirrored bars.
+        Bars bb = b;
+        if (getenv("CC_SHORT")) {
+            double base = b.c.size() ? b.c[0] * 2.0 : 0.0;
+            for (int i = 0; i < bb.N; i++) { bb.o[i] = base - b.o[i]; bb.c[i] = base - b.c[i];
+                double lo = base - b.h[i], hi = base - b.l[i]; bb.l[i] = lo; bb.h[i] = hi; }
+        }
+        const Bars& bx = getenv("CC_SHORT") ? bb : b;
+
+        // REAL windows: identical construction to coldcut (up-jump, or CC_FADE mean-reversion).
+        std::vector<Window> ws;
+        if (getenv("CC_FADE")) {
+            bool pos = false; int ei = 0; double epx = 0, jent = 0;
+            for (int i = W; i < bx.N; i++) { double j = bx.c[i] / bx.c[i - W] - 1.0;
+                if (!pos && j <= -_thr) { int e = i + 1; if (e >= bx.N) continue; pos = true; ei = e; epx = bx.o[e]; jent = j; }
+                else if (pos && j >= _thr) { int x = i + 1; if (x >= bx.N) x = bx.N - 1; ws.push_back({ei, x, epx, jent}); pos = false; } }
+            if (pos) ws.push_back({ei, bx.N - 1, epx, jent});
+        } else ws = parent(bx, W, _thr);
+
+        double actual = book_net(engine_book_stagger(bx, ws, arms, 1, 0, _rt));
+        int nreal = 0; { auto rr = engine_book_stagger(bx, ws, arms, 1, 0, _rt); nreal = (int)rr.size(); }
+        std::vector<int> durs; for (auto& w : ws) durs.push_back(w.xi - w.ei);
+
+        std::vector<double> nets;
+        for (int seed = 0; seed < NSEED; seed++) {
+            std::mt19937 rng(1000 + seed);
+            std::vector<int> d = durs; std::shuffle(d.begin(), d.end(), rng);
+            std::vector<std::pair<int, int>> placed; std::vector<Window> rws;
+            for (int dur : d) {
+                for (int tries = 0; tries < 200; tries++) {
+                    int lo = W + 1, hi = bx.N - 2 - dur; if (hi <= lo) break;
+                    int ei = lo + (int)(rng() % (uint64_t)(hi - lo));
+                    bool ok = true;
+                    for (auto& pl : placed) if (ei < pl.second && ei + dur > pl.first) { ok = false; break; }
+                    if (ok) { placed.push_back({ei, ei + dur}); rws.push_back({ei, ei + dur, bx.o[ei], _thr}); break; }
+                }
+            }
+            nets.push_back(book_net(engine_book_stagger(bx, rws, arms, 1, 0, _rt)));
+        }
+        unsetenv("LOSS_CUT");
+        double mu = 0; for (double v : nets) mu += v; mu /= nets.size();
+        double sd = 0; for (double v : nets) sd += (v - mu) * (v - mu); sd = std::sqrt(sd / nets.size());
+        std::vector<double> sorted = nets; std::sort(sorted.begin(), sorted.end());
+        double p95 = sorted[(size_t)(0.95 * (sorted.size() - 1))];
+        int below = 0; for (double v : nets) if (v < actual) below++;
+        double pct = 100.0 * below / nets.size();
+        double z = sd > 0 ? (actual - mu) / sd : 0;
+        const char* dir = getenv("CC_SHORT") ? "SHORT" : (getenv("CC_FADE") ? "FADE" : "LONG");
+        std::fprintf(stderr, "%-6s %-5s cut=%-4sbp W=%d thr=%.2f%% RT=%.0fbp seeds=%d realN=%d realWin=%zu\n",
+            coin.c_str(), dir, cut, W, _thr * 100, _rt, NSEED, nreal, ws.size());
+        std::fprintf(stderr, "  real=%+.0f%%  rand_mu=%+.0f%%  rand_sd=%.0f%%  rand_95pct=%+.0f%%  z=%.2f  percentile=%.1f%%\n",
+            actual, mu, sd, p95, z, pct);
+        // machine-readable line on stdout (verbose engine CLIP logs go to stdout too; grep RESULT)
+        std::printf("RESULT %s %s real=%.1f mu=%.1f sd=%.1f p95=%.1f z=%.3f pct=%.2f\n",
+            coin.c_str(), dir, actual, mu, sd, p95, z, pct);
         return 0;
     }
 
