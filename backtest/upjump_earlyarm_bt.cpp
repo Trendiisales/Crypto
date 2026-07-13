@@ -967,6 +967,10 @@ int main(int argc, char** argv) {
                 else if(pos&&j>=_thr){int x=i+1;if(x>=bx.N)x=bx.N-1;ws.push_back({ei,x,epx,jent});pos=false;}}
             if(pos)ws.push_back({ei,bx.N-1,epx,jent});
         } else ws=parent(bx,W,_thr);
+        // CC_FROMYEAR: 2022 is FULLY IRRELEVANT for long-only spot (operator 2026-07-13, final) —
+        // exclude pre-fromyear windows from EVALUATION entirely (entry-year attribution).
+        int fromyear = getenv("CC_FROMYEAR") ? atoi(getenv("CC_FROMYEAR")) : 0;
+        if (fromyear > 0) { std::vector<Window> fw; for (auto& w : ws) if (year_of(bx.ts[w.ei]) >= fromyear) fw.push_back(w); ws = fw; }
         const char* dir = getenv("CC_SHORT")?"SHORT":(getenv("CC_FADE")?"FADE":"LONG");
 
         std::printf("CONFIRMED-ENTRY sweep — %s %s W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp  BE-cascade book, REAL column\n",
@@ -1040,6 +1044,12 @@ int main(int argc, char** argv) {
         if(!B.count(coin))B[coin]=load(coin);
         const Bars& b=B[coin]; if(!b.N){std::fprintf(stderr,"no data for %s\n",coin.c_str());return 1;}
         auto ws = parent(b,W,_thr);
+        int fromyear = getenv("CC_FROMYEAR") ? atoi(getenv("CC_FROMYEAR")) : 0;
+        int lo_bound = W+1;
+        if (fromyear > 0) {
+            std::vector<Window> fw; for (auto& w : ws) if (year_of(b.ts[w.ei]) >= fromyear) fw.push_back(w); ws = fw;
+            while (lo_bound < b.N && year_of(b.ts[lo_bound]) < fromyear) lo_bound++;   // random placement inside the same window
+        }
         std::vector<double> arms={0.2,2,3,4,6,8};
         auto run_ws=[&](const std::vector<Window>& wl)->double{
             double net=0;
@@ -1072,7 +1082,7 @@ int main(int argc, char** argv) {
             std::vector<std::pair<int,int>> placed; std::vector<Window> rws;
             for(int dur:d){
                 for(int tries=0;tries<200;tries++){
-                    int lo=W+1, hi=b.N-2-dur; if(hi<=lo)break;
+                    int lo=lo_bound, hi=b.N-2-dur; if(hi<=lo)break;
                     int ei=lo+(int)(rng()%(uint64_t)(hi-lo));
                     bool ok=true;
                     for(auto&pl:placed) if(ei<pl.second&&ei+dur>pl.first){ok=false;break;}
