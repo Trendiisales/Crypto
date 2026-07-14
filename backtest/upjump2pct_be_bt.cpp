@@ -164,7 +164,7 @@ int main(int argc,char**argv){
         int W=atoi(argv[2]); double thr=atof(argv[3])/100.0, s=atof(argv[4])/100.0, g=atof(argv[5]);
         std::printf("CONFIG: W=%dh thr=%.1f%% preBE-stop=%.1f%% giveback=%.0f%% RT=20bp (2x=40)\n",
             W,thr*100,s*100,g*100);
-        std::printf("%-6s %5s %+10s %6s %+8s %+8s %+9s %+9s %+9s %5s %+8s %6s | GATE\n",
+        std::printf("%-6s %5s %10s %6s %8s %8s %9s %9s %9s %5s %8s %6s | GATE\n",
             "coin","n","net_bp","PF","worst","maxDD","y2022","WF-H1","WF-H2","preBE","preBEbp","2x_net");
         double tot=0,tot2=0; int npass=0;
         for(int c=0;c<NC;c++){
