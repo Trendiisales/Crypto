@@ -182,5 +182,49 @@ int main(int argc,char**argv){
         std::printf("PORTFOLIO net=%+.0fbp 2x=%+.0fbp PASS=%d/19\n",tot,tot2,npass);
         return 0;
     }
-    std::fprintf(stderr,"mode? sweep|detail\n"); return 1;
+    if(mode=="percoin"){
+        // Full per-coin lever map. Cell PASS = corrected long-only gate (n>=30).
+        // PLATEAU = cell PASS and >=3 of 4 thr/W neighbors have net>0 at 1x cost
+        // (kills isolated-ridge cells like ETH W1/2%).
+        double thrs[]={0.02,0.025,0.03,0.035,0.04,0.045,0.05,0.055,0.06,0.07,0.08,0.10,0.12};
+        int Ws[]={1,2,3,4,6,8,12,24};
+        double ss[]={0.0,0.01,0.02}; double gs[]={0.3,0.5,1.0};
+        const int NT=13,NW=8;
+        for(int c=0;c<NC;c++){
+            auto& b=B[COINS[c]]; if(!b.N){ std::printf("%-6s NO-DATA\n",COINS[c]); continue; }
+            struct Cell{ double net2=-1e18,net=0,pf=0,worst=0,y22=0; int n=0; bool pass=false,plat=false; int wi=0,ti=0; double s=0,g=0; };
+            // net at 1x for every (wi,ti) at each (s,g) — for neighbor test
+            static double net1[3][3][NW][NT];
+            Cell best;
+            for(int si=0;si<3;si++) for(int gi=0;gi<3;gi++)
+                for(int wi=0;wi<NW;wi++) for(int ti=0;ti<NT;ti++){
+                    Res r=run_full(b,Ws[wi],thrs[ti],ss[si],gs[gi],20.0);
+                    net1[si][gi][wi][ti]=r.net;
+                }
+            for(int si=0;si<3;si++) for(int gi=0;gi<3;gi++)
+                for(int wi=0;wi<NW;wi++) for(int ti=0;ti<NT;ti++){
+                    Res r=run_full(b,Ws[wi],thrs[ti],ss[si],gs[gi],20.0);
+                    if(r.n<30) continue;
+                    double pf=r.losses>0? r.wins/r.losses:(r.wins>0?99:0);
+                    if(!(r.net>0&&pf>=1.3&&r.wf1>0&&r.wf2>0)) continue;
+                    Res r2=run_full(b,Ws[wi],thrs[ti],ss[si],gs[gi],40.0);
+                    if(r2.net<=0) continue;
+                    int ok=0,tot=0;
+                    int dw[]={-1,1,0,0}, dt[]={0,0,-1,1};
+                    for(int k=0;k<4;k++){ int w2=wi+dw[k],t2=ti+dt[k];
+                        if(w2<0||w2>=NW||t2<0||t2>=NT) continue;
+                        tot++; if(net1[si][gi][w2][t2]>0) ok++; }
+                    bool plat = tot>0 && ok*4>=tot*3;   // >=75% of existing neighbors positive
+                    if(!plat) continue;
+                    if(r2.net>best.net2){ best={r2.net,r.net,pf,r.worst,r.y2022,r.n,true,true,wi,ti,ss[si],gs[gi]}; }
+                }
+            if(best.pass)
+                std::printf("%-6s VIABLE  W=%-2d thr=%.1f%% s=%.0f%% g=%.1f | n=%d net=%+.0fbp PF=%.2f 2x=%+.0f worst=%+.0f y22=%+.0f\n",
+                    COINS[c],Ws[best.wi],thrs[best.ti]*100,best.s*100,best.g,best.n,best.net,best.pf,best.net2,best.worst,best.y22);
+            else std::printf("%-6s NO-CELL (no plateau-validated PASS across 936 lever combos)\n",COINS[c]);
+            std::fflush(stdout);
+        }
+        return 0;
+    }
+    std::fprintf(stderr,"mode? sweep|detail|percoin\n"); return 1;
 }
