@@ -226,6 +226,27 @@ int main(int argc,char**argv){
         }
         return 0;
     }
+    if(mode=="stopsweep"){
+        // stopsweep COIN W thr_pct g — hold the wired cell (W,thr,g), sweep the
+        // pre-BE stop s over a fine grid. Full history, full stats at 1x + 2x cost.
+        // Ask 2026-07-14: per-trade hard cap re-sweep on the 16 s=0 PJ cells.
+        std::string coin=argv[2]; int W=atoi(argv[3]);
+        double thr=atof(argv[4])/100.0, g=atof(argv[5]);
+        auto& b=B[coin]; if(!b.N){ std::fprintf(stderr,"no data %s\n",coin.c_str()); return 1; }
+        double sgrid[]={0.0,0.0025,0.005,0.0075,0.01,0.015,0.02,0.03,0.04,0.05};
+        std::printf("%s W=%d thr=%.1f%% g=%.1f\n",coin.c_str(),W,thr*100,g);
+        std::printf("  s%%    n   net_bp    PF   worst   maxDD  preBE%% preBE_bp   WF-H1   WF-H2  2x_net | GATE\n");
+        for(double s:sgrid){
+            Res r=run_full(b,W,thr,s,g,20.0);
+            Res r2=run_full(b,W,thr,s,g,40.0);
+            double pf=r.losses>0? r.wins/r.losses:(r.wins>0?99:0);
+            bool pass = r.n>=30 && r.net>0 && pf>=1.3 && r.wf1>0 && r.wf2>0 && r2.net>0;
+            std::printf("%5.2f %4d %+8.0f %5.2f %+7.0f %+7.0f  %5.1f%% %+8.0f %+7.0f %+7.0f %+7.0f | %s\n",
+                s*100,r.n,r.net,pf,r.worst,-r.maxdd,r.n?100.0*r.n_prebe/r.n:0,r.prebe_bp,
+                r.wf1,r.wf2,r2.net,pass?"PASS":"fail");
+        }
+        return 0;
+    }
     if(mode=="trades"){
         // trades COIN W thr_pct s_pct g — per-trade dump for eyeball verification
         std::string coin=argv[2]; int W=atoi(argv[3]);
