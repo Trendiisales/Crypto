@@ -54,3 +54,60 @@ not built, so no live provision owed.
    matches the backtest exactly.)
 5. Reversal (j ≤ −2%) at close → cancel stop, MARKET SELL.
 Engine = one small C++ loop on josgp1 (no python — feedback-no-python-working-system).
+
+## PER-COIN LEVER MAP (operator follow-up, 2026-07-14: "pull every lever, where viable per coin")
+
+`percoin` mode added: 936 combos/coin = thr {2,2.5,3,3.5,4,4.5,5,5.5,6,7,8,10,12}% ×
+W {1,2,3,4,6,8,12,24}h × pre-BE stop {0,1,2}% × giveback g {0.3,0.5,1.0=reversal-only}.
+Gate = corrected long-only (net>0, PF≥1.3, WF-H1>0, WF-H2>0, 2×cost>0, n≥30) + PLATEAU
+(≥75% of thr/W neighbors net-positive at 1× — kills isolated ridges; ETH W1/2% did NOT
+return; ETH's plateau cell is W24/7%). Best cell per coin ranked by 2×-cost net.
+
+### Result: 17/19 VIABLE at higher thresholds; LDO + LTC NO-CELL
+
+| coin | W | thr% | s% | g | n | net bp | PF | 2× bp | worst | y2022 | top1/net |
+|------|---|------|----|----|-----|---------|-------|---------|--------|---------|----------|
+| AAVE | 1 | 4.0 | 0 | 1.0 | 227 | +20206 | 1.66 | +24127 | -2772 | -558 | 41% |
+| ADA | 8 | 8.0 | 0 | 1.0 | 152 | +22779 | 2.90 | +19073 | -2854 | -993 | 36% |
+| AVAX | 2 | 8.0 | 0 | 1.0 | 80 | +32515 | 3.58 | +42445 | -3231 | -1927 | 45% |
+| BCH | 1 | 5.5 | 0 | 0.5 | 58 | +15341 | 4.73 | +14576 | -1306 | +587 | 65% |
+| BNB | 12 | 7.0 | 0 | 1.0 | 120 | +19703 | 6.14 | +24323 | -1652 | -1652 | 87% |
+| BTC | 1 | 4.0 | 0 | 1.0 | 30 | +7974 | 16.21 | +7914 | -524 | -524 | 90% |
+| DOGE | 12 | 3.0 | 0 | 1.0 | 937 | +85030 | 1.93 | +64614 | -1814 | -13626 | 72% |
+| ETH | 24 | 7.0 | 0 | 1.0 | 223 | +18498 | 2.01 | +19058 | -1571 | -506 | 51% |
+| GRT | 1 | 5.0 | 0 | 1.0 | 133 | +23559 | 2.56 | +17109 | -4440 | +1061 | 59% |
+| LDO | - | - | - | - | - | NO-CELL | | | | | |
+| LINK | 1 | 6.0 | 2 | 1.0 | 32 | +19257 | 6.84 | +13212 | -220 | -1540 | 89% |
+| LTC | - | - | - | - | - | NO-CELL | | | | | |
+| NEAR | 1 | 5.5 | 0 | 1.0 | 101 | +16204 | 2.12 | +15888 | -3028 | -607 | 61% |
+| OP | 1 | 4.0 | 0 | 0.3 | 196 | +16507 | 1.76 | +11010 | -2130 | +5918 | 18% |
+| SOL | 24 | 8.0 | 0 | 1.0 | 365 | +18938 | 1.75 | +19427 | -1711 | -4904 | 41% |
+| TRX | 2 | 4.5 | 0 | 1.0 | 100 | +18252 | 4.29 | +15046 | -1061 | -1457 | 27% |
+| UNI | 3 | 8.0 | 0 | 0.3 | 95 | +8696 | 1.74 | +7729 | -3206 | -327 | 40% |
+| XLM | 1 | 5.0 | 0 | 1.0 | 85 | +16789 | 2.51 | +22241 | -2691 | -13 | 65% |
+| XRP | 8 | 12.0 | 0 | 0.3 | 65 | +15555 | 4.59 | +15295 | -1531 | +884 | 20% |
+
+### Reading the map
+- **The killer lever was the uniform 2% threshold.** Viability starts ≈3-4% and the winning
+  shape is almost uniformly: immediate entry + BE-floor + ride-to-reversal, NO pre-BE bracket,
+  NO trail (s=0, g=1.0 in 13/17; LINK alone prefers s=2%). Pre-BE brackets remain harmful —
+  consistent with the thr=2% verdict.
+- **Payoff concentration (trade-list eyeball, `trades` mode added):** g=1.0 cells scratch
+  70-90% of trades at exactly BE (+0.0bp — floor working as designed) and earn from rare big
+  riders. top1/net = single best trade's share of net.
+  ROBUST tier (top1 ≤45%, n ≥65): OP 18%, XRP 20%, TRX 27%, ADA 36%, UNI 40%, SOL 41%,
+  AAVE 41%, AVAX 45%. FRAGILE lottery tier (top1 ≥65% or n<35): BTC (90% = one trade,
+  2024-08-05), LINK 89%, BNB 87%, DOGE 72%, BCH 65%, XLM 65%.
+- **Earlier "thr=4% dies at 2×cost" line was PORTFOLIO-level at one uniform config**; per-coin
+  tuned cells each pass their own 2×-cost re-sim. Not a contradiction.
+- **Cross-check vs CryptoUpJumpBullCells (mimic/confirm ladder mechanism):** LTC dead in both.
+  TRX strong in both. Coins certified NO-CELL under confirm (BTC/ETH/SOL/XRP/XLM/GRT/OP/BCH/AVAX)
+  return VIABLE here — immediate entry catches the move the confirm bar missed; BE-floor turns
+  would-be losers into scratches.
+- **Loss-protection verdict:** inherent in the sweep (floor + bracket levers). Per-cell verdict:
+  BE-floor yes; pre-BE hard stop harmful (except LINK s=2%).
+
+### Status: STUDY ONLY — NOT WIRED
+Immediate-entry class remains operator-forbidden-by-default
+(feedback-no-immediate-entry-upjump-mimic-only). Any wiring needs explicit operator confirm
+against this table, robust tier first.

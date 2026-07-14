@@ -226,5 +226,20 @@ int main(int argc,char**argv){
         }
         return 0;
     }
-    std::fprintf(stderr,"mode? sweep|detail|percoin\n"); return 1;
+    if(mode=="trades"){
+        // trades COIN W thr_pct s_pct g — per-trade dump for eyeball verification
+        std::string coin=argv[2]; int W=atoi(argv[3]);
+        double thr=atof(argv[4])/100.0, s=atof(argv[5])/100.0, g=atof(argv[6]);
+        auto& b=B[coin]; if(!b.N){ std::fprintf(stderr,"no data %s\n",coin.c_str()); return 1; }
+        Res r=run_full(b,W,thr,s,g,20.0);
+        std::printf("%s W=%d thr=%.1f%% s=%.0f%% g=%.1f — %d trades net=%+.0fbp\n",
+            coin.c_str(),W,thr*100,s*100,g,r.n,r.net);
+        for(auto& t:r.tr){
+            time_t sec=t.ets/1000; struct tm gm; gmtime_r(&sec,&gm); char buf[32];
+            strftime(buf,sizeof buf,"%Y-%m-%d %H:%M",&gm);
+            std::printf("  %s  %+8.1fbp%s\n",buf,t.net_bp,t.prebe_stop?"  [preBE-stop]":"");
+        }
+        return 0;
+    }
+    std::fprintf(stderr,"mode? sweep|detail|percoin|trades\n"); return 1;
 }
