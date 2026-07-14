@@ -1030,6 +1030,67 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (mode == "mimicg") {
+        // MIMIC-FLOOR g-SWEEP (S-2026-07-15, operator: unify every mimic to ONE exit =
+        // BE-floored tight-giveback trail; find the SMALLEST g that keeps EACH cell's OWN
+        // book net-positive after real cost, both WF halves). Single managed leg (cap=1),
+        // confirmed entry (confirm_bp), per-tick BE floor + HWM trail by g — drives the REAL
+        // engine mimic_floor path (parity by construction). Long-only gate (omit 2022):
+        //   PASS = net>0 & PF>=1.3 & H1>0 & H2>0  AND  2x-cost net>0 & PF>=1.3.
+        // Envs: CC_COIN CC_W CC_THR CC_RT(20) CC_CUT(50) CC_CONFIRM(20) CC_FROMYEAR(2023)
+        //       MF_G (comma list, default 1.0,0.75,0.6,0.5,0.4,0.3,0.25,0.2,0.15,0.1)
+        std::string coin = getenv("CC_COIN")?getenv("CC_COIN"):"GOLD";
+        int W = getenv("CC_W")?atoi(getenv("CC_W")):1;
+        double _thr=getenv("CC_THR")?atof(getenv("CC_THR")):0.04;
+        double _rt =getenv("CC_RT") ?atof(getenv("CC_RT")) :20.0;
+        double _cut=getenv("CC_CUT")?atof(getenv("CC_CUT")):50.0;
+        double _cf =getenv("CC_CONFIRM")?atof(getenv("CC_CONFIRM")):20.0;
+        double _rc =getenv("CC_RECLIP")?atof(getenv("CC_RECLIP")):0.0;   // re-enter on +rc continuation past prior peak (operator spec #4)
+        std::vector<double> gs; { const char*ge=getenv("MF_G"); std::string gl=ge?ge:"1.0,0.75,0.6,0.5,0.4,0.3,0.25,0.2,0.15,0.1";
+            std::stringstream ss(gl); std::string t; while(std::getline(ss,t,',')) if(!t.empty()) gs.push_back(atof(t.c_str())); }
+        if(!B.count(coin))B[coin]=load(coin);
+        const Bars&b=B[coin]; if(!b.N){std::fprintf(stderr,"no data %s\n",coin.c_str());return 1;}
+        std::vector<Window> ws=parent(b,W,_thr);
+        int fromyear=getenv("CC_FROMYEAR")?atoi(getenv("CC_FROMYEAR")):2023;
+        if(fromyear>0){std::vector<Window>fw;for(auto&w:ws)if(year_of(b.ts[w.ei])>=fromyear)fw.push_back(w);ws=fw;}
+        std::printf("MIMIC-FLOOR g-sweep — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp confirm=%.0fbp reclip=%.1f%%  windows=%zu (fromyear=%d)\n",
+            coin.c_str(),W,_thr*100,_rt,_cut,_cf,_rc*100,ws.size(),fromyear);
+        std::printf("%-5s | %5s %9s %6s %8s | %5s %9s | %9s %9s | %9s | %s\n",
+            "g","n","net%","PF","worst_bp","nNeg","sumNeg%","H1%","H2%","bestEpi%","GATE(base;2x)");
+        struct Rec{int64_t ts;double net;int epi;};
+        auto run=[&](double g,double rt){
+            std::vector<Rec> rows;
+            for(size_t wi=0;wi<ws.size();wi++){const Window&w=ws[wi];
+                UpJumpLadderCompanion::Config c; c.parent_tag="BT";c.tag="BT";c.symbol="bt";
+                c.tight={0.2,0,0.0,0}; c.reclip_pct=_rc; c.cap=1; c.cost_gate_bp=0;
+                c.confirm_bp=_cf; c.be_floor=false; c.det_w=0; c.tf_secs=3600; c.round_trip_bp=rt;
+                c.loss_cut_bp=_cut; c.mimic_floor=true; c.mimic_giveback=g;
+                UpJumpLadderCompanion eng(c); int64_t cur_ts=0;
+                eng.set_on_clip([&](const UpJumpLadderCompanion::ClipRecord&rc){rows.push_back({cur_ts,rc.net_bp_real,(int)wi});});
+                for(int i=w.ei;i<w.xi;i++){cur_ts=b.ts[i];
+                    if(i<(int)b.l.size())eng.stop_check_only(b.l[i],(int64_t)i*TF_MS);
+                    eng.observe(true,w.epx,b.c[i],(int64_t)i*TF_MS);}
+                int lix=(w.xi-1>=w.ei)?w.xi-1:w.ei; double lpx=(w.xi-1>=w.ei)?b.c[w.xi-1]:w.epx;
+                cur_ts=b.ts[lix]; eng.observe(false,w.epx,lpx,(int64_t)lix*TF_MS);
+            }
+            double net=0,gw=0,gl=0,worst=0,negsum=0;int neg=0;
+            for(auto&r:rows){net+=r.net/100.0;if(r.net>0)gw+=r.net;else{gl-=r.net;neg++;negsum+=r.net/100.0;}if(r.net<worst)worst=r.net;}
+            double pf=gl>0?gw/gl:(gw>0?999:0);
+            std::vector<Rec>so=rows;std::sort(so.begin(),so.end(),[](const Rec&a,const Rec&c){return a.ts<c.ts;});
+            double h1=0,h2=0;for(size_t k=0;k<so.size();k++){if(k<so.size()/2)h1+=so[k].net/100.0;else h2+=so[k].net/100.0;}
+            std::map<int,double>epin;for(auto&r:rows)epin[r.epi]+=r.net/100.0;double bestepi=0;for(auto&kv:epin)if(kv.second>bestepi)bestepi=kv.second;
+            struct R{int n;double net,pf,worst;int neg;double negsum,h1,h2,bestepi;};
+            return R{(int)rows.size(),net,pf,worst,neg,negsum,h1,h2,bestepi};
+        };
+        for(double g:gs){
+            auto r=run(g,_rt); auto r2=run(g,_rt*2.0);
+            bool gate = r.net>0&&r.pf>=1.3&&r.h1>0&&r.h2>0 && r2.net>0&&r2.pf>=1.3;
+            std::printf("%5.2f | %5d %+9.0f %6.2f %+8.1f | %5d %+9.1f | %+9.0f %+9.0f | %+9.0f | %s [2x net%+.0f pf%.2f]\n",
+                g,r.n,r.net,r.pf,r.worst,r.neg,r.negsum,r.h1,r.h2,r.bestepi, gate?"PASS":"fail", r2.net,r2.pf);
+        }
+        return 0;
+    }
+
     if (mode == "confirmrand") {
         // RANDOM-ENTRY CONTROL for a confirmcut cell: same window count + durations placed
         // uniformly at random (non-overlapping), SAME UpJumpLadderCompanion config
