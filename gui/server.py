@@ -50,7 +50,7 @@ def _nq_poll_loop():
     # handshake storm). ControlPersist keeps the master alive between polls.
     cmd=["ssh","-o","ConnectTimeout=5","-o","BatchMode=yes","-o","ServerAliveInterval=15",
          "-o","ControlMaster=auto","-o","ControlPath=/tmp/ssh-omega-nq-%r@%h:%p","-o","ControlPersist=120",
-         "omega-vps","powershell -NoProfile -EncodedCommand "+_NQ_B64]
+         "omega-new","powershell -NoProfile -EncodedCommand "+_NQ_B64]
     while True:
         try:
             out=subprocess.run(cmd,capture_output=True,text=True,timeout=10)

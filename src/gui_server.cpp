@@ -4,7 +4,7 @@
 //   - server-side freshness guard (_fresh) injected into /api/state + /api/state_intraday
 //     so a dead producer badges RED instead of letting browser-side WS marks fake liveness;
 //   - real-time NDX from OUR IBKR feed (background thread tails the last NQ trade over a
-//     multiplexed ssh to omega-vps, scales NQ-future -> ^NDX by the 0.991 carry basis).
+//     multiplexed ssh to omega-new, scales NQ-future -> ^NDX by the 0.991 carry basis).
 // Faithful port of server.py — same env knobs, same fallbacks, same JSON shapes.
 #include "json.hpp"
 #include "httplib.h"
@@ -217,7 +217,7 @@ static void nq_poll_loop() {
     const std::string cmd =
         "ssh -o ConnectTimeout=5 -o BatchMode=yes -o ServerAliveInterval=15 "
         "-o ControlMaster=auto -o ControlPath=/tmp/ssh-omega-nq-%r@%h:%p -o ControlPersist=120 "
-        "omega-vps \"powershell -NoProfile -EncodedCommand " + b64 + "\" 2>/dev/null";
+        "omega-new \"powershell -NoProfile -EncodedCommand " + b64 + "\" 2>/dev/null";
     while (true) {
         std::string out;
         if (FILE* p = popen(cmd.c_str(), "r")) {

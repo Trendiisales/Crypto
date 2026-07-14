@@ -1,7 +1,7 @@
 #!/bin/bash
 # Mac daily: pull VPS staged L2 archives -> Google Drive 'L2 backup' -> purge VPS originals.
 GD="/Users/jo/Library/CloudStorage/GoogleDrive-kiwi18@gmail.com/My Drive/L2 backup"
-VPS=omega-vps
+VPS=omega-new
 LOG=/Users/jo/Crypto/ops/backup_pull.log
 ts(){ date -u '+%F %T'; }
 mkdir -p "$GD" 2>/dev/null
