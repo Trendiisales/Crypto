@@ -262,5 +262,80 @@ int main(int argc,char**argv){
         }
         return 0;
     }
-    std::fprintf(stderr,"mode? sweep|detail|percoin|trades\n"); return 1;
+    if(mode=="lowthr"){
+        // 2026-07-14 LOWTHR STOP-RESCUE (S-2026-07-14av): the 4 stop-compatible
+        // survivors of the stopsweep cull (ETH/AAVE/GRT/DOGE) — do LOWER jump
+        // thresholds (1.0-3.0%) become viable when rescued by a per-coin fine
+        // pre-BE stop + BE-floor? Uniform 2% was 0/19 (pre-BE bleed); the fine
+        // stop grid was never run below thr=3. Gate = full corrected long-only
+        // + plateau + 2023-26-only recheck + top1<=45% of net. thr<=2.5 answers
+        // the ask; thr=3.0 rows are boundary context only.
+        const char* CS[]={"ETH","AAVE","GRT","DOGE"};
+        double thrs[]={0.010,0.015,0.020,0.025,0.030};
+        int Ws[]={1,2,3,4,6,8,12,24};
+        double ss[]={0.0025,0.005,0.0075,0.01,0.015,0.02,0.03,0.04,0.05};
+        double gs[]={0.3,0.5,1.0};
+        const int NT=5,NW=8,NS=9,NG=3;
+        struct St{ double net=0,pf=0,wf1=0,wf2=0,worst=0,maxdd=0,y22=0,n2326=0,top1=0; int n=0; };
+        static St S[NS][NG][NW][NT];
+        for(int ci=0;ci<4;ci++){
+            auto& b=B[CS[ci]]; if(!b.N){ std::printf("%s NO-DATA\n",CS[ci]); continue; }
+            for(int si=0;si<NS;si++) for(int gi=0;gi<NG;gi++)
+                for(int wi=0;wi<NW;wi++) for(int ti=0;ti<NT;ti++){
+                    Res r=run_full(b,Ws[wi],thrs[ti],ss[si],gs[gi],20.0);
+                    St& s=S[si][gi][wi][ti]; s=St{};
+                    s.net=r.net; s.wf1=r.wf1; s.wf2=r.wf2; s.worst=r.worst;
+                    s.maxdd=r.maxdd; s.y22=r.y2022; s.n=r.n;
+                    s.pf=r.losses>0? r.wins/r.losses:(r.wins>0?99:0);
+                    for(auto& t:r.tr){ if(year_of(t.ets)>=2023) s.n2326+=t.net_bp;
+                                       if(t.net_bp>s.top1) s.top1=t.net_bp; }
+                }
+            std::printf("── %s ── PASS cells (thr W s g | n net PF WF1 WF2 2x net23-26 top1%% y22 worst maxDD)\n",CS[ci]);
+            int npass_low=0,npass_bnd=0; double best2x=-1e18; char bestln[256]="";
+            // gate funnel (diagnostic, printed after the PASS rows)
+            int f_tot=0,f_net=0,f_basic=0,f_2326=0,f_top1=0,f_plat=0;
+            double bestnet=-1e18; char bestnetln[160]="";
+            for(int si=0;si<NS;si++) for(int gi=0;gi<NG;gi++)
+                for(int wi=0;wi<NW;wi++) for(int ti=0;ti<NT;ti++){
+                    St& s=S[si][gi][wi][ti];
+                    f_tot++;
+                    if(s.net>bestnet){ bestnet=s.net; std::snprintf(bestnetln,sizeof bestnetln,
+                        "%.1f%% W=%d s=%.2f%% g=%.1f n=%d net=%+.0f PF=%.2f WF=%+.0f/%+.0f 23-26=%+.0f top1=%.0f%%",
+                        thrs[ti]*100,Ws[wi],ss[si]*100,gs[gi],s.n,s.net,s.pf,s.wf1,s.wf2,
+                        s.n2326,s.net>0?100.0*s.top1/s.net:0); }
+                    if(s.net>0) f_net++;
+                    if(!(s.n>=30 && s.net>0 && s.pf>=1.3 && s.wf1>0 && s.wf2>0)) continue;
+                    f_basic++;
+                    if(s.n2326<=0) continue;                       // 2022-regime artifact filter
+                    f_2326++;
+                    if(s.top1>0.45*s.net) continue;                // payoff-concentration cap
+                    f_top1++;
+                    int ok=0,tot=0; int dw[]={-1,1,0,0}, dt[]={0,0,-1,1};
+                    for(int k=0;k<4;k++){ int w2=wi+dw[k],t2=ti+dt[k];
+                        if(w2<0||w2>=NW||t2<0||t2>=NT) continue;
+                        tot++; if(S[si][gi][w2][t2].net>0) ok++; }
+                    if(!(tot>0 && ok*4>=tot*3)) continue;          // plateau >=75%
+                    f_plat++;
+                    Res r2=run_full(b,Ws[wi],thrs[ti],ss[si],gs[gi],40.0);
+                    if(r2.net<=0) continue;                        // 2x-cost re-sim
+                    char ln[256];
+                    std::snprintf(ln,sizeof ln,
+                        "  %.1f%% W=%-2d s=%.2f%% g=%.1f | n=%-4d %+8.0f PF=%.2f %+7.0f %+7.0f %+7.0f %+8.0f %4.0f%% %+8.0f %+6.0f %+7.0f",
+                        thrs[ti]*100,Ws[wi],ss[si]*100,gs[gi],s.n,s.net,s.pf,s.wf1,s.wf2,
+                        r2.net,s.n2326,100.0*s.top1/s.net,s.y22,s.worst,-s.maxdd);
+                    std::printf("%s%s\n",ln,thrs[ti]>0.0251?"  [thr=3 boundary]":"");
+                    if(thrs[ti]<=0.0251){ npass_low++;
+                        if(r2.net>best2x){ best2x=r2.net; std::snprintf(bestln,sizeof bestln,"%s",ln); } }
+                    else npass_bnd++;
+                }
+            if(npass_low) std::printf("%s BEST thr<=2.5:%s\n",CS[ci],bestln);
+            else std::printf("%s: NO PASSING CELL at thr<=2.5%% (boundary thr=3.0 passes: %d)\n",CS[ci],npass_bnd);
+            std::printf("  funnel: %d cells | net>0: %d | +basic(n,PF,WF): %d | +2023-26: %d | +top1<=45%%: %d | +plateau: %d\n",
+                f_tot,f_net,f_basic,f_2326,f_top1,f_plat);
+            std::printf("  best raw net cell: %s\n",bestnetln);
+            std::fflush(stdout);
+        }
+        return 0;
+    }
+    std::fprintf(stderr,"mode? sweep|detail|percoin|trades|stopsweep|lowthr\n"); return 1;
 }
