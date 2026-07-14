@@ -111,3 +111,24 @@ return; ETH's plateau cell is W24/7%). Best cell per coin ranked by 2×-cost net
 Immediate-entry class remains operator-forbidden-by-default
 (feedback-no-immediate-entry-upjump-mimic-only). Any wiring needs explicit operator confirm
 against this table, robust tier first.
+
+## 2026-07-14 PRE-BE STOP RE-SWEEP → CULL TO 4 (operator: "remove all and only keep those 4 that are viable")
+
+`stopsweep` mode: hold each wired cell's W/thr/g, sweep s ∈ {0.25,0.5,0.75,1,1.5,2,3,4,5}%
+(intrabar resting stop, gap-through at open). Gate unchanged (n≥30, net>0, PF≥1.3, WF both, 2×-cost>0).
+
+Stop VIABLE (kept, wired with stop):
+| coin | s | net vs s=0 | worst | maxDD | note |
+|------|---|-----------|-------|-------|------|
+| ETH  | 4% | +18,575 vs +18,498 (FREE) | −420 vs −1,571 | −3,360 vs −4,849 | strictly better |
+| AAVE | 1% | +19,469 vs +20,206 (−3.6%) | −120 vs −2,772 | −5,173 vs −9,131 | DD halved |
+| GRT  | 5% | +22,025 vs +23,559 (−6.5%) | −520 vs −4,440 | ≈same | |
+| DOGE | 4% | +73,934 vs +85,030 (−13%) | −458 vs −1,814 | ≈same | |
+
+Stop DESTROYS the cell (all s fail gate): AVAX BCH BNB NEAR OP SOL UNI XRP — 60–96% of
+entries stopped pre-BE; the dip-below-entry that a stop kills is the same dip that precedes
+the big riders (SOL flips +18,938 → −9,445 at s=0.5). Expensive-but-passing: ADA s=2 (−29%),
+TRX s=2 (−51%), XLM s=1.5 (−44%), BTC s=0.25 (thin n=32). Operator call: all 13 non-kept
+cells REMOVED (incl. LINK's s=2 cell). Live roster after cull: AAVE-PJ4W1 s=1%, DOGE-PJ3W12
+s=4%, ETH-PJ7W24 s=4%, GRT-PJ5W1 s=5%; retire_bp rebased to −2× stopped-config maxDD.
+Deploy: box 518ab3c (Mac ChimeraCrypto af6babb), 14-07-2026.
