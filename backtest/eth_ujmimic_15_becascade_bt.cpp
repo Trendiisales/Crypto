@@ -38,8 +38,9 @@ using chimera::UpJumpLadderCompanion;
 struct Bar { int64_t ts; double o,h,l,c; };
 static std::vector<std::string> split(const std::string&s){std::vector<std::string>v;std::stringstream ss(s);std::string t;while(std::getline(ss,t,','))v.push_back(t);return v;}
 static std::vector<Bar> load(){
-    std::vector<Bar> b; std::ifstream f("/Users/jo/Crypto/backtest/data/ETHUSDT_1h.csv");
-    if(!f){std::fprintf(stderr,"no ETH data\n");return b;} std::string ln; std::getline(f,ln);
+    const char* cn=getenv("UM_COIN"); std::string coin=cn?cn:"ETH";
+    std::vector<Bar> b; std::ifstream f("/Users/jo/Crypto/backtest/data/"+coin+"USDT_1h.csv");
+    if(!f){std::fprintf(stderr,"no %s data\n",coin.c_str());return b;} std::string ln; std::getline(f,ln);
     while(std::getline(f,ln)){auto v=split(ln);if(v.size()<5)continue;Bar x;x.ts=(int64_t)std::stoll(v[0]);
         x.o=std::stod(v[1]);x.h=std::stod(v[2]);x.l=std::stod(v[3]);x.c=std::stod(v[4]);
         if(x.c>0)b.push_back(x);} return b;
