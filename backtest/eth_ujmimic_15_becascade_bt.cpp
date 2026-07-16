@@ -53,12 +53,18 @@ static int yidx(int y){int k=y-2021;return k<0?0:(k>7?7:k);}
 
 // drive the REAL engine self-detecting over ETH; return the STANDALONE mimic book
 static double g_losscut=0.0;
+static double g_confirm=0.0;   // UM_CONFIRM: BE-ENTRY confirm_bp — leg stays FLAT (books nothing)
+                               // until fav>=confirm_bp, then opens AT the confirm price. >0 removes
+                               // the pre-BE window => no PREBE_CUT loss (feedback-no-prebe-loss-ever).
+static int    g_anchor=0;      // UM_ANCHOR: confirm_anchor_epx — keep le=epx (window entry) on confirm
+                               // open so the leg is FLOORED ON OPEN at BE (worst clip net>=0).
 static Agg run(const std::vector<Bar>& b, int W, double thr, double g, int legs, double rt){
     UpJumpLadderCompanion::Config c;
     c.parent_tag="SELF"; c.tag="ETH-UJ15"; c.symbol="ethusdt";
     c.det_w=W; c.det_thr=thr; c.tf_secs=3600; c.round_trip_bp=rt;
     c.mimic_floor=true; c.mimic_stagger=true; c.stagger_mode=1; c.stagger_be_bp=20.0;
-    c.reclip_pct=0.0; c.loss_cut_bp=g_losscut; c.confirm_bp=0.0; c.be_floor=false;
+    c.reclip_pct=0.0; c.loss_cut_bp=g_losscut; c.confirm_bp=g_confirm; c.be_floor=false;
+    c.confirm_anchor_epx=(g_anchor!=0);
     c.mimic_giveback=g;
     c.tight={0.2,0,0.0,0,0.0}; c.wide={0.2,0,0.0,0,0.0};
     for(int k=2;k<legs;k++) c.extra_base.push_back({0.2,0,0.0,0,0.0});
@@ -86,6 +92,8 @@ int main(){
     double rt = getenv("UM_RT")?atof(getenv("UM_RT")):28.0;
     double thr= getenv("UM_THR")?atof(getenv("UM_THR")):0.015;
     g_losscut = getenv("UM_LOSSCUT")?atof(getenv("UM_LOSSCUT")):0.0;
+    g_confirm = getenv("UM_CONFIRM")?atof(getenv("UM_CONFIRM")):0.0;
+    g_anchor  = getenv("UM_ANCHOR")?atoi(getenv("UM_ANCHOR")):0;
     std::vector<int> Ws; { const char*e=getenv("UM_W"); std::string s=e?e:"1,4,12,24";
         std::stringstream ss(s); std::string t; while(std::getline(ss,t,','))if(!t.empty())Ws.push_back(atoi(t.c_str())); }
     std::vector<double> Gs; { const char*e=getenv("UM_G"); std::string s=e?e:"1.0,0.75,0.5";
