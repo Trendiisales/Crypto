@@ -38,8 +38,9 @@
 #include <algorithm>
 
 static const char* COINS[] = {"AAVE","ADA","AVAX","BCH","BNB","BTC","DOGE","ETH","GRT",
-                              "LDO","LINK","LTC","NEAR","OP","SOL","TRX","UNI","XLM","XRP"};
-static const int NC = 19;
+                              "LDO","LINK","LTC","NEAR","OP","SOL","TRX","UNI","XLM","XRP",
+                              "ONDO"};
+static const int NC = 20;
 
 struct Bars { std::vector<int64_t> ts; std::vector<double> o,h,l,c; int N=0; };
 
