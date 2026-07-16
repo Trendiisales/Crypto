@@ -1053,8 +1053,14 @@ int main(int argc, char** argv) {
         std::vector<Window> ws=parent(b,W,_thr);
         int fromyear=getenv("CC_FROMYEAR")?atoi(getenv("CC_FROMYEAR")):2023;
         if(fromyear>0){std::vector<Window>fw;for(auto&w:ws)if(year_of(b.ts[w.ei])>=fromyear)fw.push_back(w);ws=fw;}
-        std::printf("MIMIC-FLOOR g-sweep — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp confirm=%.0fbp reclip=%.1f%%  windows=%zu (fromyear=%d)\n",
-            coin.c_str(),W,_thr*100,_rt,_cut,_cf,_rc*100,ws.size(),fromyear);
+        // CC_TRENDGATE=K (1h bars, 0/unset=off): up-only STRUCTURAL filter (operator ask #2,
+        // "the most likely methodology to rescue chop-losers" — NO 200DMA, NO moving average).
+        // Arm a window only when price at entry is above price K bars earlier (higher-high
+        // trend proxy). Suppresses up-jumps that fire inside a down/chop leg (the whipsaw source).
+        int tgate=getenv("CC_TRENDGATE")?atoi(getenv("CC_TRENDGATE")):0;
+        if(tgate>0){std::vector<Window>tw;for(auto&w:ws){int ref=w.ei-1-tgate; if(ref>=0 && b.c[w.ei-1]>b.c[ref]) tw.push_back(w);} ws=tw;}
+        std::printf("MIMIC-FLOOR g-sweep — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp confirm=%.0fbp reclip=%.1f%% trendgate=%d  windows=%zu (fromyear=%d)\n",
+            coin.c_str(),W,_thr*100,_rt,_cut,_cf,_rc*100,tgate,ws.size(),fromyear);
         std::printf("%-5s | %5s %9s %6s %8s | %5s %9s | %9s %9s | %9s | %s\n",
             "g","n","net%","PF","worst_bp","nNeg","sumNeg%","H1%","H2%","bestEpi%","GATE(base;2x)");
         struct Rec{int64_t ts;double net;int epi;};
@@ -1087,6 +1093,88 @@ int main(int argc, char** argv) {
             bool gate = r.net>0&&r.pf>=1.3&&r.h1>0&&r.h2>0 && r2.net>0&&r2.pf>=1.3;
             std::printf("%5.2f | %5d %+9.0f %6.2f %+8.1f | %5d %+9.1f | %+9.0f %+9.0f | %+9.0f | %s [2x net%+.0f pf%.2f]\n",
                 g,r.n,r.net,r.pf,r.worst,r.neg,r.negsum,r.h1,r.h2,r.bestepi, gate?"PASS":"fail", r2.net,r2.pf);
+        }
+        return 0;
+    }
+
+    if (mode == "mimicstag") {
+        // 4x STAGGERED FLOORED LADDER (S-2026-07-16, operator: "once we get to BE ... open at
+        // least 4x mimics, stagger them ... never go negative on a mimic"). Same detector windows
+        // as mimicg, but drives the extended engine: N legs each with an ESCALATING per-tier
+        // confirm (BE / +1% / +2% / ...), mimic_stagger=true, cap==#tiers. Each leg floors at its
+        // OWN fill -> distinct additive positions, post-arm never-negative. Long-only gate (omit
+        // 2022): PASS = net>0 & PF>=1.3 & H1>0 & H2>0 AND 2x-cost net>0 & PF>=1.3.
+        // Proof column: FLOOR_TRAIL clips (armed) must be >=0 (that IS the never-negative claim);
+        // the tail lives only in pre-arm PREBE_CUT/ENGINE_EXIT flushes.
+        // Envs: CC_COIN CC_W CC_THR CC_RT(20) CC_CUT(0) CC_RECLIP(0.05) CC_FROMYEAR(2023)
+        //       CC_CONFIRMS (comma bp list, default "20,120,220,320" = BE/+1/+2/+3%)
+        //       MF_G (comma g list, default "1.0,0.75,0.5")
+        std::string coin = getenv("CC_COIN")?getenv("CC_COIN"):"BNB";
+        int W = getenv("CC_W")?atoi(getenv("CC_W")):1;
+        double _thr=getenv("CC_THR")?atof(getenv("CC_THR")):0.04;
+        double _rt =getenv("CC_RT") ?atof(getenv("CC_RT")) :20.0;
+        double _cut=getenv("CC_CUT")?atof(getenv("CC_CUT")):0.0;      // pre-arm cut (0 = findings default: cut churns)
+        double _rc =getenv("CC_RECLIP")?atof(getenv("CC_RECLIP")):0.05;
+        std::vector<double> confs; { const char*ce=getenv("CC_CONFIRMS"); std::string cl=ce?ce:"20,120,220,320";
+            std::stringstream ss(cl); std::string t; while(std::getline(ss,t,',')) if(!t.empty()) confs.push_back(atof(t.c_str())); }
+        std::vector<double> gs; { const char*ge=getenv("MF_G"); std::string gl=ge?ge:"1.0,0.75,0.5";
+            std::stringstream ss(gl); std::string t; while(std::getline(ss,t,',')) if(!t.empty()) gs.push_back(atof(t.c_str())); }
+        if(!B.count(coin))B[coin]=load(coin);
+        const Bars&b=B[coin]; if(!b.N){std::fprintf(stderr,"no data %s\n",coin.c_str());return 1;}
+        std::vector<Window> ws=parent(b,W,_thr);
+        int fromyear=getenv("CC_FROMYEAR")?atoi(getenv("CC_FROMYEAR")):2023;
+        if(fromyear>0){std::vector<Window>fw;for(auto&w:ws)if(year_of(b.ts[w.ei])>=fromyear)fw.push_back(w);ws=fw;}
+        std::printf("STAGGERED FLOORED %zux LADDER — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp reclip=%.1f%% confirms=[",
+            confs.size(),coin.c_str(),W,_thr*100,_rt,_cut,_rc*100);
+        for(size_t k=0;k<confs.size();k++)std::printf("%s%.0f",k?",":"",confs[k]);
+        std::printf("]bp windows=%zu (fromyear=%d)\n",ws.size(),fromyear);
+        std::printf("%-5s | %5s %9s %6s %8s | %5s %9s | %9s %9s | %9s %10s | %s\n",
+            "g","n","net%","PF","worst_bp","nNeg","sumNeg%","H1%","H2%","floorNet%","floorMinBp","GATE(base;2x)");
+        struct Rec{int64_t ts;double net;int epi;int leg;bool floored;};
+        auto legidx=[&](const std::string&tag)->int{ // -T1/-T2/-S1/-S2 -> 0..N
+            auto p=tag.rfind('-'); if(p==std::string::npos)return 0; std::string s=tag.substr(p+1);
+            if(s=="T1")return 0; if(s=="T2")return 1; if(!s.empty()&&s[0]=='S')return 1+atoi(s.c_str()+1); return 0; };
+        auto run=[&](double g,double rt){
+            std::vector<Rec> rows;
+            for(size_t wi=0;wi<ws.size();wi++){const Window&w=ws[wi];
+                UpJumpLadderCompanion::Config c; c.parent_tag="BT";c.tag="BT";c.symbol="bt";
+                c.tight={0.2,0,0.0,0,confs[0]};
+                if(confs.size()>1) c.wide={0.2,0,0.0,0,confs[1]};
+                for(size_t k=2;k<confs.size();k++) c.extra_base.push_back({0.2,0,0.0,0,confs[k]});
+                c.reclip_pct=_rc; c.cap=(int)confs.size(); c.cost_gate_bp=0;
+                c.confirm_bp=confs[0]; c.be_floor=false; c.det_w=0; c.tf_secs=3600; c.round_trip_bp=rt;
+                c.loss_cut_bp=_cut; c.mimic_floor=true; c.mimic_stagger=true; c.mimic_giveback=g;
+                c.stagger_mode=0;   // per-leg confirm gates the opens (escalating entry), not advance_stagger_
+                UpJumpLadderCompanion eng(c); int64_t cur_ts=0;
+                eng.set_on_clip([&](const UpJumpLadderCompanion::ClipRecord&rc){
+                    bool fl = std::string(rc.reason).find("FLOOR_TRAIL")!=std::string::npos;
+                    rows.push_back({cur_ts,rc.net_bp_real,(int)wi,legidx(rc.tag),fl});});
+                for(int i=w.ei;i<w.xi;i++){cur_ts=b.ts[i];
+                    if(i<(int)b.l.size())eng.stop_check_only(b.l[i],(int64_t)i*TF_MS);
+                    eng.observe(true,w.epx,b.c[i],(int64_t)i*TF_MS);}
+                int lix=(w.xi-1>=w.ei)?w.xi-1:w.ei; double lpx=(w.xi-1>=w.ei)?b.c[w.xi-1]:w.epx;
+                cur_ts=b.ts[lix]; eng.observe(false,w.epx,lpx,(int64_t)lix*TF_MS);
+            }
+            double net=0,gw=0,gl=0,worst=0,negsum=0,floornet=0,floormin=0;int neg=0;
+            std::vector<double>legnet(confs.size(),0.0);std::vector<int>legn(confs.size(),0);
+            for(auto&r:rows){net+=r.net/100.0;if(r.net>0)gw+=r.net;else{gl-=r.net;neg++;negsum+=r.net/100.0;}
+                if(r.net<worst)worst=r.net;
+                if(r.floored){floornet+=r.net/100.0; if(r.net<floormin)floormin=r.net;}
+                if(r.leg>=0&&r.leg<(int)legnet.size()){legnet[r.leg]+=r.net/100.0;legn[r.leg]++;}}
+            double pf=gl>0?gw/gl:(gw>0?999:0);
+            std::vector<Rec>so=rows;std::sort(so.begin(),so.end(),[](const Rec&a,const Rec&c){return a.ts<c.ts;});
+            double h1=0,h2=0;for(size_t k=0;k<so.size();k++){if(k<so.size()/2)h1+=so[k].net/100.0;else h2+=so[k].net/100.0;}
+            struct R{int n;double net,pf,worst;int neg;double negsum,h1,h2,floornet,floormin;std::vector<double>legnet;std::vector<int>legn;};
+            return R{(int)rows.size(),net,pf,worst,neg,negsum,h1,h2,floornet,floormin,legnet,legn};
+        };
+        for(double g:gs){
+            auto r=run(g,_rt); auto r2=run(g,_rt*2.0);
+            bool gate = r.net>0&&r.pf>=1.3&&r.h1>0&&r.h2>0 && r2.net>0&&r2.pf>=1.3;
+            std::printf("%5.2f | %5d %+9.0f %6.2f %+8.1f | %5d %+9.1f | %+9.0f %+9.0f | %+9.0f %+10.1f | %s [2x net%+.0f pf%.2f]\n",
+                g,r.n,r.net,r.pf,r.worst,r.neg,r.negsum,r.h1,r.h2,r.floornet,r.floormin, gate?"PASS":"fail", r2.net,r2.pf);
+            std::printf("      per-leg net%%:");
+            for(size_t k=0;k<r.legnet.size();k++)std::printf(" %s[c%.0f]=%+.0f(n%d)",k==0?"T1":(k==1?"T2":("S"+std::to_string(k-1)).c_str()),confs[k],r.legnet[k],r.legn[k]);
+            std::printf("\n");
         }
         return 0;
     }
