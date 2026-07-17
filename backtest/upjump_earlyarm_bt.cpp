@@ -1046,6 +1046,8 @@ int main(int argc, char** argv) {
         double _cut=getenv("CC_CUT")?atof(getenv("CC_CUT")):50.0;
         double _cf =getenv("CC_CONFIRM")?atof(getenv("CC_CONFIRM")):20.0;
         double _rc =getenv("CC_RECLIP")?atof(getenv("CC_RECLIP")):0.0;   // re-enter on +rc continuation past prior peak (operator spec #4)
+        int _anchor=getenv("CC_ANCHOR")?atoi(getenv("CC_ANCHOR")):0;      // S-2026-07-17: confirm_anchor_epx (floored-on-open at BE)
+        int _areclip=getenv("CC_ARECLIP")?atoi(getenv("CC_ARECLIP")):0;   // S-2026-07-17: anchored_reclip (floored reclip re-entry)
         std::vector<double> gs; { const char*ge=getenv("MF_G"); std::string gl=ge?ge:"1.0,0.75,0.6,0.5,0.4,0.3,0.25,0.2,0.15,0.1";
             std::stringstream ss(gl); std::string t; while(std::getline(ss,t,',')) if(!t.empty()) gs.push_back(atof(t.c_str())); }
         if(!B.count(coin))B[coin]=load(coin);
@@ -1059,8 +1061,8 @@ int main(int argc, char** argv) {
         // trend proxy). Suppresses up-jumps that fire inside a down/chop leg (the whipsaw source).
         int tgate=getenv("CC_TRENDGATE")?atoi(getenv("CC_TRENDGATE")):0;
         if(tgate>0){std::vector<Window>tw;for(auto&w:ws){int ref=w.ei-1-tgate; if(ref>=0 && b.c[w.ei-1]>b.c[ref]) tw.push_back(w);} ws=tw;}
-        std::printf("MIMIC-FLOOR g-sweep — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp confirm=%.0fbp reclip=%.1f%% trendgate=%d  windows=%zu (fromyear=%d)\n",
-            coin.c_str(),W,_thr*100,_rt,_cut,_cf,_rc*100,tgate,ws.size(),fromyear);
+        std::printf("MIMIC-FLOOR g-sweep — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp confirm=%.0fbp anchor=%d reclip=%.1f%% trendgate=%d  windows=%zu (fromyear=%d)\n",
+            coin.c_str(),W,_thr*100,_rt,_cut,_cf,_anchor,_rc*100,tgate,ws.size(),fromyear);
         std::printf("%-5s | %5s %9s %6s %8s | %5s %9s | %9s %9s | %9s | %s\n",
             "g","n","net%","PF","worst_bp","nNeg","sumNeg%","H1%","H2%","bestEpi%","GATE(base;2x)");
         struct Rec{int64_t ts;double net;int epi;};
@@ -1070,6 +1072,7 @@ int main(int argc, char** argv) {
                 UpJumpLadderCompanion::Config c; c.parent_tag="BT";c.tag="BT";c.symbol="bt";
                 c.tight={0.2,0,0.0,0}; c.reclip_pct=_rc; c.cap=1; c.cost_gate_bp=0;
                 c.confirm_bp=_cf; c.be_floor=false; c.det_w=0; c.tf_secs=3600; c.round_trip_bp=rt;
+                c.confirm_anchor_epx=(_anchor!=0); c.anchored_reclip=(_areclip!=0);
                 c.loss_cut_bp=_cut; c.mimic_floor=true; c.mimic_giveback=g;
                 UpJumpLadderCompanion eng(c); int64_t cur_ts=0;
                 eng.set_on_clip([&](const UpJumpLadderCompanion::ClipRecord&rc){rows.push_back({cur_ts,rc.net_bp_real,(int)wi});});
@@ -1115,6 +1118,8 @@ int main(int argc, char** argv) {
         double _rt =getenv("CC_RT") ?atof(getenv("CC_RT")) :20.0;
         double _cut=getenv("CC_CUT")?atof(getenv("CC_CUT")):0.0;      // pre-arm cut (0 = findings default: cut churns)
         double _rc =getenv("CC_RECLIP")?atof(getenv("CC_RECLIP")):0.05;
+        int _anchor=getenv("CC_ANCHOR")?atoi(getenv("CC_ANCHOR")):0;   // S-2026-07-17: confirm_anchor_epx (floored-on-open at BE)
+        int _areclip=getenv("CC_ARECLIP")?atoi(getenv("CC_ARECLIP")):0;// S-2026-07-17: anchored_reclip (floored reclip re-entry)
         std::vector<double> confs; { const char*ce=getenv("CC_CONFIRMS"); std::string cl=ce?ce:"20,120,220,320";
             std::stringstream ss(cl); std::string t; while(std::getline(ss,t,',')) if(!t.empty()) confs.push_back(atof(t.c_str())); }
         std::vector<double> gs; { const char*ge=getenv("MF_G"); std::string gl=ge?ge:"1.0,0.75,0.5";
@@ -1124,8 +1129,8 @@ int main(int argc, char** argv) {
         std::vector<Window> ws=parent(b,W,_thr);
         int fromyear=getenv("CC_FROMYEAR")?atoi(getenv("CC_FROMYEAR")):2023;
         if(fromyear>0){std::vector<Window>fw;for(auto&w:ws)if(year_of(b.ts[w.ei])>=fromyear)fw.push_back(w);ws=fw;}
-        std::printf("STAGGERED FLOORED %zux LADDER — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp reclip=%.1f%% confirms=[",
-            confs.size(),coin.c_str(),W,_thr*100,_rt,_cut,_rc*100);
+        std::printf("STAGGERED FLOORED %zux LADDER — %s LONG W=%d thr=%.2f%% RT=%.0fbp cut=%.0fbp anchor=%d reclip=%.1f%% confirms=[",
+            confs.size(),coin.c_str(),W,_thr*100,_rt,_cut,_anchor,_rc*100);
         for(size_t k=0;k<confs.size();k++)std::printf("%s%.0f",k?",":"",confs[k]);
         std::printf("]bp windows=%zu (fromyear=%d)\n",ws.size(),fromyear);
         std::printf("%-5s | %5s %9s %6s %8s | %5s %9s | %9s %9s | %9s %10s | %s\n",
@@ -1143,6 +1148,7 @@ int main(int argc, char** argv) {
                 for(size_t k=2;k<confs.size();k++) c.extra_base.push_back({0.2,0,0.0,0,confs[k]});
                 c.reclip_pct=_rc; c.cap=(int)confs.size(); c.cost_gate_bp=0;
                 c.confirm_bp=confs[0]; c.be_floor=false; c.det_w=0; c.tf_secs=3600; c.round_trip_bp=rt;
+                c.confirm_anchor_epx=(_anchor!=0); c.anchored_reclip=(_areclip!=0);
                 c.loss_cut_bp=_cut; c.mimic_floor=true; c.mimic_stagger=true; c.mimic_giveback=g;
                 c.stagger_mode=0;   // per-leg confirm gates the opens (escalating entry), not advance_stagger_
                 UpJumpLadderCompanion eng(c); int64_t cur_ts=0;
@@ -1412,6 +1418,13 @@ int main(int argc, char** argv) {
         bool mimic_on = envd("CP_MIMIC", 1) > 0;
         auto pstops = list("CP_PSTOP", "30,50,70");
         auto ptrails = list("CP_PTRAIL", "0,25,35,50,70");
+        // S-2026-07-17 operator order (17f out-of-class ruling REVERSED): mimic-way
+        // giveback on the PARENT — once floored, lock (1-pgb) of MFE. pgb=1.0 = inert
+        // (term <= BE floor). CP_PGBARM: 0 = arm at the fee-BE point (pmfe>=0.9*pstop,
+        // campaign floor semantics), 1 = arm at cost-covered (pmfe>=RT, exact jf/mimic
+        // semantics incl. BE floor at that point).
+        auto pgbs = list("CP_PGB", "1.0");
+        int pgbarm = (int)envd("CP_PGBARM", 0);
         auto macts = list("CP_MACT", "60");
         auto mstops = list("CP_MSTOP", "16");
         auto mtrails = list("CP_MTRAIL", "22");
@@ -1424,7 +1437,7 @@ int main(int argc, char** argv) {
         struct CClip { int64_t ts; double bp; bool is_mimic; int epi; };
         // one full campaign sim -> clips (parent bp in parent units, mimic bp in mimic units)
         auto run = [&](double pstop, double ptrail, double mact, double mstop, double mtrail,
-                       double rt) -> std::vector<CClip> {
+                       double rt, double pgb = 1.0) -> std::vector<CClip> {
             std::vector<CClip> out;
             double fund_need = MFRAC * (mstop + rt + SLIP + RES);  // parent-unit bp mimic worst-case
             for (size_t wi = 0; wi < ws.size(); wi++) {
@@ -1466,6 +1479,14 @@ int main(int argc, char** argv) {
                     if (pmfe >= 0.9 * pstop) pstop_px = std::max(pstop_px, pe * (1.0 + (rt + 3.0) / 1e4));
                     if (pmfe >= 1.8 * pstop) pstop_px = std::max(pstop_px, pe * (1.0 + (rt + 0.4 * pstop) / 1e4));
                     if (ptrail > 0 && pmfe >= 2.0 * pstop) pstop_px = std::max(pstop_px, phwm * (1.0 - ptrail / 1e4));
+                    // mimic-way giveback (S-2026-07-17, see CP_PGB above)
+                    if (pgb < 1.0) {
+                        if (pgbarm == 1 && pmfe >= rt)
+                            pstop_px = std::max(pstop_px, std::max(pe * (1.0 + rt / 1e4),
+                                                pe * (1.0 + pmfe * (1.0 - pgb) / 1e4)));
+                        else if (pgbarm == 0 && pmfe >= 0.9 * pstop)
+                            pstop_px = std::max(pstop_px, pe * (1.0 + pmfe * (1.0 - pgb) / 1e4));
+                    }
                     // mimic ladder — spec anchor mstop=16: fee-BE +27, lock +50 (0.6*stop net), trail +60
                     if (mopen) {
                         if (cl > mhwm) mhwm = cl;
@@ -1563,19 +1584,19 @@ int main(int argc, char** argv) {
             mimic_on ? "" : "  [PARENT-ONLY]");
         std::printf("%5s %6s %5s %5s %5s | %4s %8s | %4s %8s %6s %7s | %8s %6s %8s | %8s %8s | %6s | %8s %8s\n",
             "pstop", "ptrail", "mact", "mstop", "mtrl", "pn", "pnet%", "mn", "mnet%", "mPF", "mworst", "comb%", "PF", "worst_bp", "H1%", "H2%", "medWin", "comb30%", "comb40%");  // +exBest col appended
-        for (double ps : pstops) for (double pt : ptrails)
+        for (double ps : pstops) for (double pt : ptrails) for (double pgb : pgbs)
         for (double ma : macts) for (double mst : mstops) for (double mt : mtrails) {
-            auto rows = run(ps, pt, ma, mst, mt, RT);
+            auto rows = run(ps, pt, ma, mst, mt, RT, pgb);
             double pnet, mnet, comb, pf, worst, h1, h2, medwin, mpf, mworst; int pn, mn;
             summarize(rows, pnet, mnet, comb, pf, pn, mn, worst, h1, h2, medwin, mpf, mworst);
             // stress re-sims: 30bp acceptance + 40bp (2x) — full re-sim, gate sees the cost
-            auto r30 = run(ps, pt, ma, mst, mt, envd("CP_ST1", 30.0));
-            auto r40 = run(ps, pt, ma, mst, mt, envd("CP_ST2", 40.0));
+            auto r30 = run(ps, pt, ma, mst, mt, envd("CP_ST1", 30.0), pgb);
+            auto r40 = run(ps, pt, ma, mst, mt, envd("CP_ST2", 40.0), pgb);
             double c30 = 0, c40 = 0;
             for (auto& r : r30) c30 += (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0;
             for (auto& r : r40) c40 += (r.is_mimic ? r.bp * MFRAC : r.bp) / 100.0;
-            std::printf("%5.0f %6.0f %5.0f %5.0f %5.0f | %4d %+8.0f | %4d %+8.0f %6.2f %+7.0f | %+8.0f %6.2f %+8.0f | %+8.0f %+8.0f | %6.0f | %+8.0f %+8.0f | exB%+7.0f\n",
-                ps, pt, ma, mst, mt, pn, pnet, mn, mnet, mpf, mworst, comb, pf, worst, h1, h2, medwin, c30, c40, exbest(rows));
+            std::printf("%5.0f %6.0f g%.2f %5.0f %5.0f %5.0f | %4d %+8.0f | %4d %+8.0f %6.2f %+7.0f | %+8.0f %6.2f %+8.0f | %+8.0f %+8.0f | %6.0f | %+8.0f %+8.0f | exB%+7.0f\n",
+                ps, pt, pgb, ma, mst, mt, pn, pnet, mn, mnet, mpf, mworst, comb, pf, worst, h1, h2, medwin, c30, c40, exbest(rows));
         }
         return 0;
     }

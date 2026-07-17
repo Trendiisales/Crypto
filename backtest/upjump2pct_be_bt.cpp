@@ -248,6 +248,29 @@ int main(int argc,char**argv){
         }
         return 0;
     }
+    if(mode=="gsweep"){
+        // gsweep COIN W thr_pct s_pct [rt_bp] — hold the wired cell (W,thr,s), sweep the
+        // giveback g fine. Operator order 2026-07-17: 17f out-of-class ruling REVERSED —
+        // every live book must lock profit mimic-way (tight giveback). Test the exact
+        // floored spec per cell before wiring (feedback-test-operator-spec-before-verdict).
+        std::string coin=argv[2]; int W=atoi(argv[3]);
+        double thr=atof(argv[4])/100.0, s=atof(argv[5])/100.0;
+        double rt=argc>6?atof(argv[6]):20.0;
+        auto& b=B[coin]; if(!b.N){ std::fprintf(stderr,"no data %s\n",coin.c_str()); return 1; }
+        double ggrid[]={0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.6,0.7,0.8,0.85,0.9,0.95,1.0};
+        std::printf("%s W=%d thr=%.1f%% s=%.2f%% rt=%.0fbp (2x=%.0f)\n",coin.c_str(),W,thr*100,s*100,rt,2*rt);
+        std::printf("    g    n   net_bp    PF   worst   maxDD  preBE%% preBE_bp   WF-H1   WF-H2  2x_net | GATE\n");
+        for(double g:ggrid){
+            Res r=run_full(b,W,thr,s,g,rt);
+            Res r2=run_full(b,W,thr,s,g,2*rt);
+            double pf=r.losses>0? r.wins/r.losses:(r.wins>0?99:0);
+            bool pass = r.n>=30 && r.net>0 && pf>=1.3 && r.wf1>0 && r.wf2>0 && r2.net>0;
+            std::printf("%5.2f %4d %+8.0f %5.2f %+7.0f %+7.0f  %5.1f%% %+8.0f %+7.0f %+7.0f %+7.0f | %s\n",
+                g,r.n,r.net,pf,r.worst,-r.maxdd,r.n?100.0*r.n_prebe/r.n:0,r.prebe_bp,
+                r.wf1,r.wf2,r2.net,pass?"PASS":"fail");
+        }
+        return 0;
+    }
     if(mode=="trades"){
         // trades COIN W thr_pct s_pct g — per-trade dump for eyeball verification
         std::string coin=argv[2]; int W=atoi(argv[3]);
@@ -338,5 +361,5 @@ int main(int argc,char**argv){
         }
         return 0;
     }
-    std::fprintf(stderr,"mode? sweep|detail|percoin|trades|stopsweep|lowthr\n"); return 1;
+    std::fprintf(stderr,"mode? sweep|detail|percoin|trades|stopsweep|lowthr|gsweep\n"); return 1;
 }
