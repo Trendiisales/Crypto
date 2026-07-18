@@ -76,3 +76,29 @@ past its reserve would dangle every earlier `_grid_feeds` pointer). Factory
 `make_becascade_cell`: confirm60 anchored, mimic_floor, stagger BE_CASCADE, reclip 0,
 loss_cut 0, cap8, catchup 24h. `_grid.reserve(220)` headroom: 132→136 live companions.
 Build green; 10/10 regression suites PASS.
+
+## ADDENDUM S-2026-07-18ac — "all 3 of these": the 1.5% + 1.0% quads SHIP too
+Operator confirmed all three per-thr quads from the sweep ship (0.5% went first in 18ab).
++8 cells, same cert (exact harness reruns reproduce the transcript tables), same gate —
+BTC now 16 books: 2.0% quad + UJ15 (1.5%) + UJ10 (1.0%) + UJ05 (0.5%).
+
+| cell | W | g | n | net% | PF | worst_bp | 2×net% | retire_bp |
+|---|---|---|---|---|---|---|---|---|
+| BTC-UJ15-BECASC-W1  | 1  | 0.75 | 1999 | +2748 | 6.50  | −783.7 | +2293 | −1567 |
+| BTC-UJ15-BECASC-W2  | 2  | 0.20 | 2800 | +3650 | 17.72 | −702.4 | +2824 | −1405 |
+| BTC-UJ15-BECASC-W4  | 4  | 0.20 | 3293 | +4180 | 19.67 | −482.5 | +3203 | −965 |
+| BTC-UJ15-BECASC-W12 | 12 | 0.75 | 3136 | +3922 | 6.28  | −482.5 | +3065 | −965 |
+| BTC-UJ10-BECASC-W1  | 1  | 0.20 | 3581 | +4632 | 19.43 | −566.9 | +3570 | −1134 |
+| BTC-UJ10-BECASC-W2  | 2  | 0.20 | 4397 | +5621 | 19.35 | −483.5 | +4315 | −967 |
+| BTC-UJ10-BECASC-W4  | 4  | 0.20 | 4783 | +6112 | 20.03 | −482.5 | +4692 | −965 |
+| BTC-UJ10-BECASC-W12 | 12 | 0.75 | 3997 | +5129 | 6.45  | −783.7 | +4064 | −1567 |
+
+All PASS the full standalone gate at base 30bp AND 2×=60bp, omit-2022. Quad sums:
+UJ15 n=11,228 net=+14,500% (2× +11,385); UJ10 n=16,758 net=+21,494% (2× +16,641).
+Note different-thr books share triggers on big moves (a +1.5% jump fires all three
+families) — they are separate books by design (companion-independent, judged standalone),
+so the quad sums do NOT add as portfolio-independent PnL.
+
+Shipped: ChimeraCrypto Mac 43816e0 / box e3ed03d, reconciled merge 01a30d2 = running
+build. Boot verified: [MIMIC-FLOOR-GATE] 144/144 0 VIOLATION, all 8 [CLIP-INIT] lines,
+RUNTIME MODE = LIVE 41-sym pilot intact (no git reset used — feedback-josgp1-no-git-reset).
