@@ -59,6 +59,12 @@ static int yidx(int y){int k=y-2021;return k<0?0:(k>7?7:k);}
 static double g_confirm=60.0;
 static int    g_anchor=1;
 static int    g_early=0;
+// S-2026-07-20 NATIVE mode: the engine now books from lg.fill_px (per-leg real open fill,
+// HONEST LEDGER order) — net_bp_real IS the honest figure; the external re-base transform
+// would DOUBLE-shift. UM_NATIVE=1 books r.net_bp_real directly. Native is STRICTER than the
+// transform in the e1 drive: the intrabar confirm fill lands at the fed bar HIGH (worse-of),
+// not the idealized le*(1+confirm).
+static int    g_native=0;
 static Agg run(const std::vector<Bar>& b, int W, double thr, double g, int legs, double rt){
     MimicLadderCompanion::Config c;
     c.parent_tag="SELF"; c.tag="HB-BT"; c.symbol="btusdt";
@@ -76,8 +82,14 @@ static Agg run(const std::vector<Bar>& b, int W, double thr, double g, int legs,
     fflush(stdout); int saved=dup(1); {int dn=open("/dev/null",O_WRONLY);dup2(dn,1);close(dn);}
     MimicLadderCompanion eng(c);
     eng.set_on_clip([&](const MimicLadderCompanion::ClipRecord& r){
-        const double cost         = r.gross_bp_real - r.net_bp_real;
-        const double honest_gross = ((1.0 + r.gross_bp_real/1e4)/(1.0 + cf) - 1.0)*1e4;
+        if(g_native){ rows.push_back({cur, r.net_bp_real}); return; }   // engine books honest (fill_px basis; BT drive => fill=bar HIGH, pessimistic BOUND)
+        // TRANSFORM basis (the certified live-fill model): entry at le*(1+confirm) — the level
+        // the mirror's market buy crosses on a dense live feed. Reconstructed from anchor_le
+        // (engine now books from fill_px, so gross_bp_real is no longer the anchored figure).
+        const double cost         = rt;      // the engine's debit == round_trip_bp of this run
+        const double honest_gross = (r.anchor_le>0 && r.exit_px>0)
+            ? (r.exit_px/(r.anchor_le*(1.0+cf)) - 1.0)*1e4
+            : ((1.0 + r.gross_bp_real/1e4)/(1.0 + cf) - 1.0)*1e4;
         rows.push_back({cur, honest_gross - cost});
     });
     for(const auto& k : b){
@@ -111,6 +123,7 @@ int main(){
     g_confirm = getenv("UM_CONFIRM")?atof(getenv("UM_CONFIRM")):60.0;
     g_anchor  = getenv("UM_ANCHOR")?atoi(getenv("UM_ANCHOR")):1;
     g_early   = getenv("UM_EARLY")?atoi(getenv("UM_EARLY")):0;
+    g_native  = getenv("UM_NATIVE")?atoi(getenv("UM_NATIVE")):0;
     std::vector<int> Ws; { const char*e=getenv("UM_W"); std::string s=e?e:"1,2,4,12";
         std::stringstream ss(s); std::string t; while(std::getline(ss,t,','))if(!t.empty())Ws.push_back(atoi(t.c_str())); }
     std::vector<double> Gs; { const char*e=getenv("UM_G"); std::string s=e?e:"0.2,0.5,0.75";
@@ -119,8 +132,9 @@ int main(){
         std::stringstream ss(s); std::string t; while(std::getline(ss,t,','))if(!t.empty())Ls.push_back(atoi(t.c_str())); }
 
     std::vector<Bar> b=load(); if(b.empty())return 1;
-    std::printf("HONEST-ENTRY-BASIS CERT — coin=%s early=%d bars=%zu thr=%.2f%% confirm=%.0fbp anchor=%d RT=%.0f/%.0fbp (entry re-based to le*(1+confirm))\n",
-        getenv("UM_COIN")?getenv("UM_COIN"):"ETH", g_early, b.size(), thr*100, g_confirm, g_anchor, rt, rt*2);
+    std::printf("HONEST-ENTRY-BASIS CERT — coin=%s early=%d native=%d bars=%zu thr=%.2f%% confirm=%.0fbp anchor=%d RT=%.1f/%.1fbp (%s)\n",
+        getenv("UM_COIN")?getenv("UM_COIN"):"ETH", g_early, g_native, b.size(), thr*100, g_confirm, g_anchor, rt, rt*2,
+        g_native?"engine-native fill_px booking":"entry re-based to le*(1+confirm)");
     std::printf("%-3s %-4s %-4s | %5s %8s %5s %9s | %5s %8s | %8s %8s | %8s %8s | %s\n",
         "W","g","leg","n","net%","PF","worst_bp","nNeg","sumNeg%","H1%","H2%","floorMinBp","2xnet%","GATE(base;2x; omit22)");
     for(int L:Ls)for(int W:Ws)for(double g:Gs){
