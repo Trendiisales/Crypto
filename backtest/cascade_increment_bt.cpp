@@ -22,6 +22,18 @@
 //
 // Build: clang++ -std=c++17 -O2 -I/Users/jo/ChimeraCrypto/include cascade_increment_bt.cpp -o cascade_increment_bt
 // Env:   UM_COIN UM_RT(30) UM_THR UM_W UM_G UM_LEGS(8) UM_CONFIRM(60) UM_INC(38) UM_LC(60) UM_EARLY(1)
+//        UM_SINGLE=1 (S-2026-07-20p order): mimic_stagger=false -> the engine's own plain
+//        mimic_floor design = ONE managed T1 leg per window event (header L979-982: extra arm
+//        tiers are meaningless under a single-g floor trail). anchor=0 own-fill + OHLC-path
+//        drive unchanged, so booking stays honest by construction. inc is a no-op (forced {0}),
+//        legs forced 1 — the sweep axes are lc x W x g only.
+//        UM_E0=1 (S-2026-07-20p order item 2a, EXACT close-confirm cert): live BECASC design
+//        (stagger_mode=1 BE-cascade, stagger_be_bp=20, uniform confirm60, legs 8) with the
+//        confirm evaluated ONLY at bar close: drive = stop_check_only(low) [byte-original
+//        certified stop drive] + observe(close). anchor=0 -> le = the ACTUAL close fill, so
+//        booking is exact own-fill (NOT the le*(1+confirm) re-base upper bound of
+//        honest_entry_basis_bt e0=747/840). inc forced {0} (uniform confirm = live design).
+//        lc sweep {30,60} = mirror own-stop o2-band parity.
 
 #include <cstdio>
 #include <cstdlib>
@@ -55,12 +67,13 @@ struct Agg { int n; double net,pf,worst,h1,h2; int neg,nprebe; double negsum,pre
 static int yidx(int y){int k=y-2021;return k<0?0:(k>7?7:k);}
 
 static double g_confirm=60.0, g_inc=38.0, g_lc=60.0, g_step=15.0;
-static int    g_early=1;
+static int    g_early=1, g_single=0, g_e0=0;
 static Agg run(const std::vector<Bar>& b, int W, double thr, double g, int legs, double rt){
     MimicLadderCompanion::Config c;
     c.parent_tag="SELF"; c.tag="CI-BT"; c.symbol="btusdt";
     c.det_w=W; c.det_thr=thr; c.tf_secs=3600; c.round_trip_bp=rt;
-    c.mimic_floor=true; c.mimic_stagger=true; c.stagger_mode=0;   // all legs eligible; each self-gates on its OWN confirm level
+    c.mimic_floor=true; c.mimic_stagger=!g_single; c.stagger_mode=0;   // all legs eligible; each self-gates on its OWN confirm level. UM_SINGLE: stagger off -> engine builds T1 only
+    if(g_e0){ c.stagger_mode=1; c.stagger_be_bp=20.0; }                // UM_E0: live BECASC release rule (BE-cascade), uniform confirm60 via inc=0
     c.reclip_pct=0.0; c.loss_cut_bp=g_lc; c.be_floor=false;
     c.confirm_bp=g_confirm;
     c.confirm_anchor_epx=false;          // le = OWN FILL -> floor/cut/booking honest by construction
@@ -93,6 +106,11 @@ static Agg run(const std::vector<Bar>& b, int W, double thr, double g, int legs,
     };
     for(const auto& k : b){
         cur=k.ts;
+        if(g_e0){                                   // EXACT close-confirm: stops tested at the low
+            eng.stop_check_only(k.l,k.ts);          // (byte-original certified stop drive); confirm
+            eng.observe(true,0.0,k.c,k.ts);         // only sees the CLOSE -> le = real close fill
+            continue;
+        }
         eng.observe(true,0.0,k.o,k.ts);
         if(k.c>=k.o){ walk(k.o,k.l,k.ts); walk(k.l,k.h,k.ts); walk(k.h,k.c,k.ts); }
         else        { walk(k.o,k.h,k.ts); walk(k.h,k.l,k.ts); walk(k.l,k.c,k.ts); }
@@ -126,9 +144,14 @@ int main(){
     std::vector<double> Gs; { const char*e=getenv("UM_G"); std::string s=e?e:"0.2,0.5,0.75";
         std::stringstream ss(s); std::string t; while(std::getline(ss,t,','))if(!t.empty())Gs.push_back(atof(t.c_str())); }
     int legs = getenv("UM_LEGS")?atoi(getenv("UM_LEGS")):8;
+    g_single = getenv("UM_SINGLE")?atoi(getenv("UM_SINGLE")):0;
+    if(g_single){ Incs={0.0}; legs=1; }   // single T1 leg: inc/legs axes are no-ops
+    g_e0 = getenv("UM_E0")?atoi(getenv("UM_E0")):0;
+    if(g_e0){ Incs={0.0}; }               // uniform confirm60 across tiers = live BECASC design
 
     std::vector<Bar> b=load(); if(b.empty())return 1;
-    std::printf("INCREMENT-CASCADE CERT — coin=%s early=%d bars=%zu thr=%.2f%% confirm=%.0fbp RT=%.0f/%.0fbp legs=%d (le=OWN FILL, honest by construction)\n",
+    std::printf("%s CERT — coin=%s early=%d bars=%zu thr=%.2f%% confirm=%.0fbp RT=%.0f/%.0fbp legs=%d (le=OWN FILL, honest by construction)\n",
+        g_e0?"E0-EXACT CLOSE-CONFIRM BECASC":(g_single?"SINGLE-LEG MIMIC":"INCREMENT-CASCADE"),
         getenv("UM_COIN")?getenv("UM_COIN"):"ETH", g_early, b.size(), thr*100, g_confirm, rt, rt*2, legs);
     std::printf("%-3s %-4s %-3s %-4s | %5s %8s %5s %9s | %5s %8s | %6s %8s | %8s %8s | %8s | %s\n",
         "lc","inc","W","g","n","net%","PF","worst_bp","nNeg","sumNeg%","nPREBE","prebe%","H1%","H2%","2xnet%","GATE(base;2x; omit22)");
