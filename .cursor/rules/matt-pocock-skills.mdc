@@ -1,0 +1,7 @@
+---
+description: Mandatory Matt Pocock engineering skills
+alwaysApply: true
+---
+Follow the "Engineering skills (mandatory)" section of AGENTS.md. Skills live in `.claude/skills/<name>/SKILL.md`.
+Always pick and follow the matching skill (tdd, to-spec, to-tickets, implement, diagnosing-bugs, code-review, triage, ...) before writing code.
+Use `issues/` for tickets, `GLOSSARY.md` for terms, `docs/adr/` for decisions.

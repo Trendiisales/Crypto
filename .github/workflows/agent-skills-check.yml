@@ -1,0 +1,14 @@
+name: agent-skills-check
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -e
+          grep -q "BEGIN matt-pocock-skills" AGENTS.md
+          grep -q "@AGENTS.md" CLAUDE.md
+          grep -q "alwaysApply: true" .cursor/rules/matt-pocock-skills.mdc
+          test -f .claude/skills/tdd/SKILL.md
+          test -f GLOSSARY.md && test -d docs/adr && test -d issues
